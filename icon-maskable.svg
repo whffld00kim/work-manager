@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full bleed background for maskable icon (safe zone = center 80%) -->
+  <rect width="512" height="512" fill="#2563eb"/>
+  <!-- clipboard body -->
+  <rect x="148" y="170" width="216" height="256" rx="16" fill="white" opacity="0.15"/>
+  <rect x="158" y="180" width="196" height="240" rx="12" fill="white"/>
+  <!-- clipboard top -->
+  <rect x="196" y="152" width="120" height="44" rx="14" fill="#1d4ed8"/>
+  <rect x="218" y="160" width="76" height="28" rx="7" fill="#93c5fd"/>
+  <!-- lines -->
+  <rect x="184" y="228" width="144" height="12" rx="6" fill="#93c5fd"/>
+  <rect x="184" y="258" width="124" height="12" rx="6" fill="#bfdbfe"/>
+  <rect x="184" y="288" width="132" height="12" rx="6" fill="#bfdbfe"/>
+  <rect x="184" y="318" width="104" height="12" rx="6" fill="#bfdbfe"/>
+  <!-- checkmark badge -->
+  <circle cx="330" cy="348" r="46" fill="#1d4ed8"/>
+  <polyline points="308,348 324,364 352,332" stroke="white" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

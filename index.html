@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1e293b" media="(prefers-color-scheme: dark)" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="업무관리" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <title>업무현황 관리</title>
+
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase (compat SDK — global firebase object) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script>tailwind.config = { darkMode: 'class' };</script>
+
+  <style>
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 9999px; }
+    .dark ::-webkit-scrollbar-thumb { background: #475569; }
+    * { box-sizing: border-box; }
+    /* Safe area for Galaxy Fold / notched phones */
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    header { padding-top: env(safe-area-inset-top); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // ═══════════════════════════════════════════════════
+    //  Utilities
+    // ═══════════════════════════════════════════════════
+    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    function today() { return new Date().toISOString().slice(0, 10); }
+    function fmtDate(d) {
+      if (!d) return '─';
+      const [y, m, dd] = d.split('-');
+      return `${y}.${m}.${dd}`;
+    }
+    function dday(targetDate, status) {
+      if (!targetDate || status === 'Completed') return null;
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const t = new Date(targetDate + 'T00:00:00');
+      const n = Math.floor((t - now) / 86400000);
+      if (n === 0) return { text: 'D-Day', cls: 'text-amber-500 font-bold' };
+      if (n > 0) return { text: `D-${n}`, cls: n <= 3 ? 'text-orange-500 font-semibold' : 'text-sky-500' };
+      return { text: `D+${Math.abs(n)} 초과`, cls: 'text-red-500 font-semibold' };
+    }
+    function isThisWeek(d) {
+      if (!d) return false;
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const dow = now.getDay();
+      const mon = new Date(now); mon.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23, 59, 59, 999);
+      return new Date(d + 'T00:00:00') >= mon && new Date(d + 'T00:00:00') <= sun;
+    }
+    function exportCSV(tasks) {
+      const H = ['발생일','업무구분','업무내용','업무상세','목표일정','현재상태','달성일정','우선순위'];
+      const rows = tasks.map(t => [
+        t.createdAt, t.category,
+        `"${(t.title||'').replace(/"/g,'""')}"`,
+        `"${(t.detail||'').replace(/"/g,'""')}"`,
+        t.targetDate, t.status, t.completedAt||'', t.priority,
+      ]);
+      const csv = '\uFEFF' + [H,...rows].map(r=>r.join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+      a.download = `업무현황_${today()}.csv`; a.click();
+    }
+    // Parse Firebase config pasted by user (handles JS object or JSON)
+    function parseFirebaseConfig(raw) {
+      let s = raw.trim();
+      // Strip "const firebaseConfig = " prefix and trailing ";"
+      s = s.replace(/^.*?=\s*/, '').replace(/;?\s*$/, '');
+      // Convert JS object keys (no quotes) to JSON keys
+      s = s.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
+      // Replace single quotes with double quotes
+      s = s.replace(/'/g, '"');
+      return JSON.parse(s);
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Constants
+    // ═══════════════════════════════════════════════════
+    const CATS  = ['Executive','Myself','Part Leader','etc'];
+    const STATS = ['In Progress','Completed'];
+    const PRIS  = ['High','Medium','Low'];
+    const PRI_ORD = { High:0, Medium:1, Low:2 };
+    const CAT_CLS = {
+      Executive:    'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
+      Myself:       'bg-sky-100    text-sky-800    dark:bg-sky-900/40    dark:text-sky-300',
+      'Part Leader':'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+      etc:          'bg-slate-100  text-slate-600  dark:bg-slate-700     dark:text-slate-300',
+    };
+    const STAT_CLS = {
+      'In Progress':'bg-blue-100   text-blue-700   dark:bg-blue-900/40   dark:text-blue-300',
+      Completed:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+    };
+    const PRI_CLS = {
+      High:  'bg-red-100   text-red-700   dark:bg-red-900/40   dark:text-red-300',
+      Medium:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+      Low:   'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+    };
+
+    // ═══════════════════════════════════════════════════
+    //  Shared style helpers
+    // ═══════════════════════════════════════════════════
+    const inputCls = "w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition";
+    const labelCls = "block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1";
+    const selCls   = "px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+    // ═══════════════════════════════════════════════════
+    //  Badge
+    // ═══════════════════════════════════════════════════
+    function Badge({ cls, children }) {
+      return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${cls}`}>{children}</span>;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Toast
+    // ═══════════════════════════════════════════════════
+    function Toast({ toast }) {
+      if (!toast) return null;
+      const bg = toast.type === 'error' ? 'bg-red-500' : toast.type === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
+      return (
+        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold text-white ${bg} max-w-xs text-center`}
+          style={{ bottom: 'calc(2rem + env(safe-area-inset-bottom))' }}>
+          {toast.msg}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Dashboard
+    // ═══════════════════════════════════════════════════
+    function Dashboard({ tasks }) {
+      const total   = tasks.length;
+      const inProg  = tasks.filter(t => t.status === 'In Progress').length;
+      const done    = tasks.filter(t => t.status === 'Completed').length;
+      const weekDue = tasks.filter(t => t.status !== 'Completed' && isThisWeek(t.targetDate)).length;
+      const catCnt  = Object.fromEntries(CATS.map(c => [c, tasks.filter(t => t.category === c).length]));
+      const maxCat  = Math.max(1, ...Object.values(catCnt));
+      return (
+        <div className="mb-5 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label:'전체',        val:total,   dot:'bg-slate-400'   },
+              { label:'In Progress', val:inProg,  dot:'bg-blue-500'    },
+              { label:'Completed',   val:done,    dot:'bg-emerald-500' },
+              { label:'금주 마감',   val:weekDue, dot:'bg-orange-500'  },
+            ].map(({ label, val, dot }) => (
+              <div key={label} className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className={`w-2.5 h-2.5 rounded-full ${dot} mb-2`}/>
+                <div className="text-2xl font-extrabold text-slate-800 dark:text-white">{val}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">업무구분별</div>
+            <div className="space-y-2">
+              {CATS.map(c => (
+                <div key={c} className="flex items-center gap-3">
+                  <div className="w-24 shrink-0"><Badge cls={CAT_CLS[c]}>{c}</Badge></div>
+                  <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                    <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width:`${(catCnt[c]/maxCat)*100}%` }}/>
+                  </div>
+                  <div className="w-5 text-right text-sm font-bold text-slate-700 dark:text-slate-300">{catCnt[c]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  FilterBar
+    // ═══════════════════════════════════════════════════
+    function FilterBar({ filters, setFilters, sort, setSort, onAdd }) {
+      return (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 mb-4">
+          <div className="flex flex-wrap gap-2 items-center">
+            <input type="text" placeholder="🔍  업무내용 검색..." value={filters.search}
+              onChange={e=>setFilters(f=>({...f,search:e.target.value}))}
+              className={`flex-1 min-w-[160px] ${selCls}`}/>
+            <select value={filters.category} onChange={e=>setFilters(f=>({...f,category:e.target.value}))} className={selCls}>
+              <option value="">전체 구분</option>
+              {CATS.map(c=><option key={c}>{c}</option>)}
+            </select>
+            <select value={filters.status} onChange={e=>setFilters(f=>({...f,status:e.target.value}))} className={selCls}>
+              <option value="">전체 상태</option>
+              {STATS.map(s=><option key={s}>{s}</option>)}
+            </select>
+            <select value={filters.priority} onChange={e=>setFilters(f=>({...f,priority:e.target.value}))} className={selCls}>
+              <option value="">전체 우선순위</option>
+              {PRIS.map(p=><option key={p}>{p}</option>)}
+            </select>
+            <select value={`${sort.field}:${sort.dir}`}
+              onChange={e=>{const[field,dir]=e.target.value.split(':');setSort({field,dir});}} className={selCls}>
+              <option value="createdAt:desc">발생일 최신</option>
+              <option value="createdAt:asc">발생일 오래된</option>
+              <option value="targetDate:asc">목표일정 빠른</option>
+              <option value="targetDate:desc">목표일정 느린</option>
+              <option value="priority:asc">우선순위 높은</option>
+              <option value="priority:desc">우선순위 낮은</option>
+            </select>
+            <button onClick={onAdd}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors">
+              + 업무 등록
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  TaskTable + TaskRow
+    // ═══════════════════════════════════════════════════
+    function TaskTable({ tasks, onSelect }) {
+      if (!tasks.length) return (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-16 text-center shadow-sm">
+          <div className="text-5xl mb-3">📋</div>
+          <div className="text-slate-400 dark:text-slate-500">등록된 업무가 없습니다</div>
+        </div>
+      );
+      return (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-700/50 text-left">
+                  {['발생일','구분','업무내용','목표일정','상태','우선순위','이력'].map(h=>(
+                    <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map(t=><TaskRow key={t.id} task={t} onClick={onSelect}/>)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    function TaskRow({ task, onClick }) {
+      const dd = dday(task.targetDate, task.status);
+      return (
+        <tr onClick={()=>onClick(task)}
+          className="hover:bg-blue-50 dark:hover:bg-slate-700/60 cursor-pointer transition-colors border-b border-slate-100 dark:border-slate-700/60 last:border-0">
+          <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(task.createdAt)}</td>
+          <td className="px-4 py-3"><Badge cls={CAT_CLS[task.category]}>{task.category}</Badge></td>
+          <td className="px-4 py-3 max-w-xs">
+            <div className="font-medium text-slate-800 dark:text-white truncate">{task.title}</div>
+            {task.detail&&<div className="text-xs text-slate-400 truncate mt-0.5">{task.detail}</div>}
+          </td>
+          <td className="px-4 py-3 whitespace-nowrap">
+            <div className="text-slate-600 dark:text-slate-400">{fmtDate(task.targetDate)}</div>
+            {dd&&<div className={`text-xs mt-0.5 ${dd.cls}`}>{dd.text}</div>}
+          </td>
+          <td className="px-4 py-3"><Badge cls={STAT_CLS[task.status]}>{task.status}</Badge></td>
+          <td className="px-4 py-3"><Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge></td>
+          <td className="px-4 py-3 text-slate-400 dark:text-slate-500">{task.history?.length||0}건</td>
+        </tr>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  TaskForm Modal
+    // ═══════════════════════════════════════════════════
+    function TaskForm({ initial, onSave, onClose }) {
+      const isEdit = !!initial;
+      const [f, setF] = useState(initial ?? {
+        createdAt:today(), category:'Executive', title:'', detail:'',
+        targetDate:'', status:'In Progress', priority:'Medium', completedAt:'', history:[],
+      });
+      function set(k,v) {
+        setF(p=>{ const n={...p,[k]:v}; if(k==='status'&&v==='In Progress') n.completedAt=''; return n; });
+      }
+      function submit(e) {
+        e.preventDefault();
+        if (!f.title.trim()) return;
+        onSave({...f, id:f.id||genId(), history:f.history||[]});
+        onClose();
+      }
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+              <h2 className="font-bold text-slate-800 dark:text-white">{isEdit?'업무 편집':'업무 등록'}</h2>
+              <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">&times;</button>
+            </div>
+            <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={labelCls}>발생일 *</label>
+                  <input type="date" required value={f.createdAt} onChange={e=>set('createdAt',e.target.value)} className={inputCls}/></div>
+                <div><label className={labelCls}>목표일정 *</label>
+                  <input type="date" required value={f.targetDate} onChange={e=>set('targetDate',e.target.value)} className={inputCls}/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={labelCls}>업무구분 *</label>
+                  <select value={f.category} onChange={e=>set('category',e.target.value)} className={inputCls}>
+                    {CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+                <div><label className={labelCls}>우선순위 *</label>
+                  <select value={f.priority} onChange={e=>set('priority',e.target.value)} className={inputCls}>
+                    {PRIS.map(p=><option key={p}>{p}</option>)}</select></div>
+              </div>
+              <div><label className={labelCls}>업무내용 *</label>
+                <input type="text" required placeholder="업무 제목을 입력하세요" value={f.title} onChange={e=>set('title',e.target.value)} className={inputCls}/></div>
+              <div><label className={labelCls}>업무 상세 <span className="font-normal text-slate-400">(선택)</span></label>
+                <textarea rows={3} value={f.detail} onChange={e=>set('detail',e.target.value)} className={`${inputCls} resize-none`}/></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={labelCls}>현재상태</label>
+                  <select value={f.status} onChange={e=>set('status',e.target.value)} className={inputCls}>
+                    {STATS.map(s=><option key={s}>{s}</option>)}</select></div>
+                <div><label className={labelCls}>달성일정 {f.status==='Completed'&&<span className="text-red-400">*</span>}</label>
+                  <input type="date" disabled={f.status!=='Completed'} value={f.completedAt||''} onChange={e=>set('completedAt',e.target.value)}
+                    className={`${inputCls} disabled:opacity-40 disabled:cursor-not-allowed`}/></div>
+              </div>
+              <div className="flex gap-3 pb-1">
+                <button type="submit" className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl">{isEdit?'수정 완료':'등록'}</button>
+                <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-bold text-sm rounded-xl">취소</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  HistoryTimeline
+    // ═══════════════════════════════════════════════════
+    function HistoryTimeline({ history, onAdd, onDelete }) {
+      const [dt, setDt]     = useState(today);
+      const [note, setNote] = useState('');
+      function add() { if (!note.trim()) return; onAdd({date:dt,note:note.trim()}); setNote(''); }
+      const sorted = [...(history||[])].sort((a,b)=>a.date.localeCompare(b.date));
+      return (
+        <div>
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">진행이력</div>
+          <div className="flex gap-2 mb-4">
+            <input type="date" value={dt} onChange={e=>setDt(e.target.value)}
+              className="px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"/>
+            <input type="text" value={note} onChange={e=>setNote(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()}
+              placeholder="이력 메모 (Enter)"
+              className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
+            <button onClick={add} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">추가</button>
+          </div>
+          {!sorted.length
+            ? <p className="text-xs text-center text-slate-400 py-4">이력이 없습니다</p>
+            : <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-slate-200 dark:bg-slate-700 rounded-full"/>
+                <div className="space-y-3">
+                  {sorted.map((item,i)=>(
+                    <div key={i} className="relative flex items-start gap-2">
+                      <div className="absolute -left-4 top-1.5 w-3 h-3 rounded-full bg-blue-500 ring-2 ring-white dark:ring-slate-800 shrink-0"/>
+                      <div className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-2.5 min-w-0">
+                        <div className="text-xs text-slate-400 mb-0.5">{fmtDate(item.date)}</div>
+                        <div className="text-sm text-slate-700 dark:text-slate-200 break-words">{item.note}</div>
+                      </div>
+                      <button onClick={()=>onDelete(i)}
+                        className="shrink-0 mt-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 text-lg leading-none">×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+          }
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  TaskDetailPanel
+    // ═══════════════════════════════════════════════════
+    function TaskDetailPanel({ task, onClose, onUpdate, onDelete }) {
+      const [editing, setEditing] = useState(false);
+      const [f, setF] = useState(task);
+      useEffect(()=>{ setF(task); setEditing(false); }, [task?.id]);
+      if (!task) return null;
+      function set(k,v) { setF(p=>{ const n={...p,[k]:v}; if(k==='status'&&v==='In Progress') n.completedAt=''; return n; }); }
+      function save() { onUpdate(f); setEditing(false); }
+      function addHistory(item) { const updated={...task,history:[...(task.history||[]),item]}; onUpdate(updated); }
+      function delHistory(idx)  { const h=[...(task.history||[])]; h.splice(idx,1); onUpdate({...task,history:h}); }
+      const dd = dday(task.targetDate, task.status);
+      return (
+        <div className="fixed inset-0 z-40 flex">
+          <div className="flex-1 bg-black/30 backdrop-blur-sm" onClick={onClose}/>
+          <div className="w-full max-w-md bg-white dark:bg-slate-800 shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge cls={STAT_CLS[task.status]}>{task.status}</Badge>
+                <Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge>
+                {dd&&<span className={`text-xs ${dd.cls}`}>{dd.text}</span>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {!editing&&<button onClick={()=>setEditing(true)}
+                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg">편집</button>}
+                <button onClick={()=>{if(confirm('삭제하시겠습니까?'))onDelete(task.id);}}
+                  className="px-3 py-1.5 text-xs bg-red-100 hover:bg-red-200 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-lg">삭제</button>
+                <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">&times;</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+              {editing ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className={labelCls}>발생일</label>
+                      <input type="date" value={f.createdAt} onChange={e=>set('createdAt',e.target.value)} className={inputCls}/></div>
+                    <div><label className={labelCls}>목표일정</label>
+                      <input type="date" value={f.targetDate} onChange={e=>set('targetDate',e.target.value)} className={inputCls}/></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className={labelCls}>업무구분</label>
+                      <select value={f.category} onChange={e=>set('category',e.target.value)} className={inputCls}>
+                        {CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+                    <div><label className={labelCls}>우선순위</label>
+                      <select value={f.priority} onChange={e=>set('priority',e.target.value)} className={inputCls}>
+                        {PRIS.map(p=><option key={p}>{p}</option>)}</select></div>
+                  </div>
+                  <div><label className={labelCls}>업무내용</label>
+                    <input type="text" value={f.title} onChange={e=>set('title',e.target.value)} className={inputCls}/></div>
+                  <div><label className={labelCls}>업무 상세</label>
+                    <textarea rows={3} value={f.detail||''} onChange={e=>set('detail',e.target.value)} className={`${inputCls} resize-none`}/></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className={labelCls}>현재상태</label>
+                      <select value={f.status} onChange={e=>set('status',e.target.value)} className={inputCls}>
+                        {STATS.map(s=><option key={s}>{s}</option>)}</select></div>
+                    <div><label className={labelCls}>달성일정</label>
+                      <input type="date" disabled={f.status!=='Completed'} value={f.completedAt||''} onChange={e=>set('completedAt',e.target.value)}
+                        className={`${inputCls} disabled:opacity-40 disabled:cursor-not-allowed`}/></div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={save} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl">저장</button>
+                    <button onClick={()=>{setEditing(false);setF(task);}} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-sm rounded-xl">취소</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-xs text-slate-400 mb-1">업무내용</div>
+                    <div className="text-base font-bold text-slate-800 dark:text-white">{task.title}</div>
+                    {task.detail&&<div className="mt-2 text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">{task.detail}</div>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {[['발생일',fmtDate(task.createdAt)],['목표일정',fmtDate(task.targetDate)],['달성일정',task.completedAt?fmtDate(task.completedAt):'─']].map(([k,v])=>(
+                      <div key={k} className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3">
+                        <div className="text-xs text-slate-400 mb-0.5">{k}</div>
+                        <div className="font-medium text-slate-700 dark:text-slate-200">{v}</div>
+                      </div>
+                    ))}
+                    <div className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3">
+                      <div className="text-xs text-slate-400 mb-1">업무구분</div>
+                      <Badge cls={CAT_CLS[task.category]}>{task.category}</Badge>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+                <HistoryTimeline history={task.history} onAdd={addHistory} onDelete={delHistory}/>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Firebase Settings Modal
+    // ═══════════════════════════════════════════════════
+    function FirebaseModal({ config, onSave, onClose }) {
+      const [tab, setTab]   = useState('config');
+      const [raw, setRaw]   = useState(config ? JSON.stringify(config, null, 2) : '');
+      const [err, setErr]   = useState('');
+      function handleSave() {
+        try {
+          const parsed = parseFirebaseConfig(raw);
+          if (!parsed.apiKey || !parsed.projectId) throw new Error('apiKey, projectId가 필요합니다.');
+          // Delete existing named app if config changed
+          try { firebase.app('wm').delete(); } catch(e) {}
+          onSave(parsed);
+          onClose();
+        } catch(e) {
+          setErr('파싱 오류: ' + e.message + '\n— Firebase 콘솔의 firebaseConfig 객체 전체를 붙여넣으세요.');
+        }
+      }
+      const tabCls = active => `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${active ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`;
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+              <h2 className="font-bold text-slate-800 dark:text-white">⚙️ 설정 / 가이드</h2>
+              <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">&times;</button>
+            </div>
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0 overflow-x-auto">
+              <button className={tabCls(tab==='config')} onClick={()=>setTab('config')}>Firebase 설정</button>
+              <button className={tabCls(tab==='fbguide')} onClick={()=>setTab('fbguide')}>Firebase 가이드</button>
+              <button className={tabCls(tab==='github')} onClick={()=>setTab('github')}>GitHub Pages</button>
+            </div>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+
+              {/* ── Tab: Firebase 설정 ── */}
+              {tab==='config' && (
+                <div className="space-y-4">
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm ${config ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'}`}>
+                    {config ? '✅ Firebase 연결됨 — 동기화 버튼을 사용할 수 있습니다.' : '⚠️ Firebase 미설정 — 아래에 Config를 붙여넣으세요.'}
+                  </div>
+                  <div>
+                    <label className={labelCls}>Firebase Config 붙여넣기</label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Firebase 콘솔 → 프로젝트 설정 → 내 앱 → SDK 설정 및 구성의 firebaseConfig 객체 전체를 붙여넣으세요.</p>
+                    <textarea value={raw} onChange={e=>{setRaw(e.target.value);setErr('');}} rows={10}
+                      placeholder={'{\n  "apiKey": "AIza...",\n  "authDomain": "your-app.firebaseapp.com",\n  "projectId": "your-project-id",\n  "storageBucket": "your-app.appspot.com",\n  "messagingSenderId": "123456789",\n  "appId": "1:123:web:abc"\n}'}
+                      className={`${inputCls} font-mono text-xs resize-none`}/>
+                    {err&&<p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">{err}</p>}
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={handleSave} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl">저장</button>
+                    {config&&<button onClick={()=>{if(confirm('Firebase 설정을 삭제하시겠습니까?')){onSave(null);onClose();}}}
+                      className="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-semibold rounded-xl text-sm">삭제</button>}
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-400 space-y-1">
+                    <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Firestore 보안 규칙 (개인용)</div>
+                    <pre className="font-mono text-[11px] whitespace-pre-wrap">{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`}</pre>
+                    <p>⬆ Firebase 콘솔 → Firestore → 규칙 탭에 붙여넣고 게시하세요.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Tab: Firebase 가이드 ── */}
+              {tab==='fbguide' && (
+                <div className="space-y-5">
+                  {[
+                    { n:1, title:'Firebase 콘솔 접속',
+                      body:'브라우저에서 console.firebase.google.com 으로 이동합니다.\nGoogle 계정으로 로그인하세요.' },
+                    { n:2, title:'새 프로젝트 만들기',
+                      body:'"프로젝트 추가" 클릭\n→ 프로젝트 이름 입력 (예: work-manager)\n→ Google Analytics는 "사용 설정 안함" 선택\n→ "프로젝트 만들기" 클릭 후 완료 대기' },
+                    { n:3, title:'웹 앱 추가',
+                      body:'프로젝트 홈 화면 상단의 </> 아이콘(웹) 클릭\n→ 앱 닉네임 입력 (예: 업무관리)\n→ "앱 등록" 클릭' },
+                    { n:4, title:'firebaseConfig 복사',
+                      body:'등록 후 표시되는 firebaseConfig 객체를\n"Firebase 설정" 탭의 텍스트 창에 붙여넣으세요.\n\n또는 나중에:\n프로젝트 설정(⚙️) → 내 앱 → SDK 설정 및 구성\n에서 다시 확인할 수 있습니다.' },
+                    { n:5, title:'Firestore 데이터베이스 생성',
+                      body:'좌측 메뉴 "빌드" → "Firestore Database"\n→ "데이터베이스 만들기" 클릭\n→ "테스트 모드에서 시작" 선택 (30일간 개방)\n→ 위치: asia-northeast3 (서울) 선택\n→ "완료"' },
+                    { n:6, title:'보안 규칙 설정 (영구 개방)',
+                      body:'Firestore Database → "규칙" 탭 클릭\n→ 기존 내용 삭제 후 "Firebase 설정" 탭의\n  보안 규칙을 붙여넣기\n→ "게시" 클릭\n\n이제 기기→클라우드, 클라우드→기기 동기화가\n가능합니다.' },
+                  ].map(({n,title,body})=>(
+                    <div key={n} className="flex gap-3">
+                      <div className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0 mt-0.5">{n}</div>
+                      <div>
+                        <div className="font-semibold text-slate-800 dark:text-white mb-1">{title}</div>
+                        <div className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-line leading-relaxed">{body}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Tab: GitHub Pages ── */}
+              {tab==='github' && (
+                <div className="space-y-5">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-sm text-blue-700 dark:text-blue-300">
+                    💡 GitHub Pages에 배포하면 PC와 폰에서 같은 URL로 접속하고, 코드 수정 시 자동으로 폰 앱이 업데이트됩니다.
+                  </div>
+                  {[
+                    { n:1, title:'GitHub 계정 생성 / 로그인',
+                      body:'github.com 에서 계정을 만들거나 로그인합니다.' },
+                    { n:2, title:'새 저장소(Repository) 만들기',
+                      body:'"New repository" 클릭\n→ 저장소 이름: work-manager (영문)\n→ Public 선택 (GitHub Pages 무료 사용)\n→ "Create repository" 클릭' },
+                    { n:3, title:'파일 업로드',
+                      body:'저장소 페이지에서 "Add file" → "Upload files"\n→ 아래 파일들을 드래그앤드롭:\n  • index.html\n  • manifest.json\n  • sw.js\n  • icon.svg\n  • icon-maskable.svg\n→ "Commit changes" 클릭' },
+                    { n:4, title:'GitHub Pages 활성화',
+                      body:'저장소 → Settings 탭 → 좌측 "Pages"\n→ Source: "Deploy from a branch"\n→ Branch: main, / (root)\n→ Save\n\n배포까지 1~3분 소요됩니다.' },
+                    { n:5, title:'URL 확인 및 공유',
+                      body:'배포 완료 후 URL:\nhttps://[사용자명].github.io/work-manager/\n\n이 URL을 앱 상단의 "🔗 URL 복사" 버튼으로\n복사하여 카카오톡으로 공유하세요.' },
+                    { n:6, title:'갤럭시 폴드7에 앱 설치 (PWA)',
+                      body:'폰 Chrome에서 URL 접속\n→ 주소창 옆 ⋮ 메뉴\n→ "앱 설치" 또는 "홈 화면에 추가"\n→ 설치 완료!\n\n이후 홈 화면 아이콘으로 바로 실행 가능합니다.\n폴드 펼침/접힘 모두 대응합니다.' },
+                    { n:7, title:'자동 업데이트 방법',
+                      body:'PC에서 파일 수정 후 GitHub에 업로드(커밋)하면\n→ GitHub Pages가 자동으로 새 버전 배포\n→ 다음 앱 실행 시 최신 버전 자동 적용\n\n별도 앱스토어 업로드 없이 즉시 반영됩니다!' },
+                  ].map(({n,title,body})=>(
+                    <div key={n} className="flex gap-3">
+                      <div className="w-7 h-7 rounded-full bg-slate-600 text-white text-xs flex items-center justify-center font-bold shrink-0 mt-0.5">{n}</div>
+                      <div>
+                        <div className="font-semibold text-slate-800 dark:text-white mb-1">{title}</div>
+                        <div className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-line leading-relaxed">{body}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  App (Root)
+    // ═══════════════════════════════════════════════════
+    function App() {
+      const [tasks, setTasks] = useState(()=>{
+        try { return JSON.parse(localStorage.getItem('wm-tasks')||'[]'); } catch { return []; }
+      });
+      const [dark, setDark] = useState(()=>
+        localStorage.getItem('wm-dark')==='true' ||
+        (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches)
+      );
+      const [fbConfig, setFbConfig] = useState(()=>{
+        try { return JSON.parse(localStorage.getItem('wm-fb')||'null'); } catch { return null; }
+      });
+      const [selected,    setSelected]    = useState(null);
+      const [showForm,    setShowForm]    = useState(false);
+      const [showFbModal, setShowFbModal] = useState(false);
+      const [filters,     setFilters]     = useState({ category:'', status:'', priority:'', search:'' });
+      const [sort,        setSort]        = useState({ field:'createdAt', dir:'desc' });
+      const [syncing,     setSyncing]     = useState('');   // '' | 'up' | 'down'
+      const [toast,       setToast]       = useState(null);
+
+      // Persist
+      useEffect(()=>{ localStorage.setItem('wm-tasks', JSON.stringify(tasks)); }, [tasks]);
+      useEffect(()=>{
+        localStorage.setItem('wm-dark', dark);
+        document.documentElement.classList.toggle('dark', dark);
+      }, [dark]);
+      useEffect(()=>{
+        if (selected) {
+          const fresh = tasks.find(t=>t.id===selected.id);
+          if (fresh) setSelected(fresh);
+        }
+      }, [tasks]);
+
+      function showToast(msg, type='success') {
+        setToast({ msg, type });
+        setTimeout(()=>setToast(null), 3500);
+      }
+
+      // CRUD
+      function addTask(t)     { setTasks(p=>[t,...p]); }
+      function updateTask(t)  { setTasks(p=>p.map(x=>x.id===t.id?t:x)); }
+      function deleteTask(id) { setTasks(p=>p.filter(x=>x.id!==id)); setSelected(null); }
+
+      // Firebase helpers
+      function getFbDb() {
+        if (!fbConfig) throw new Error('Firebase 미설정');
+        let app;
+        try { app = firebase.app('wm'); }
+        catch { app = firebase.initializeApp(fbConfig, 'wm'); }
+        return firebase.firestore(app);
+      }
+
+      async function uploadToCloud() {
+        if (!fbConfig) { setShowFbModal(true); showToast('Firebase를 먼저 설정해주세요', 'warn'); return; }
+        setSyncing('up');
+        try {
+          const db = getFbDb();
+          await db.collection('workmanager').doc('main').set({
+            tasks: JSON.stringify(tasks),
+            updatedAt: new Date().toISOString(),
+            deviceCount: tasks.length,
+          });
+          showToast(`☁️ 클라우드에 저장했습니다 (${tasks.length}건)`);
+        } catch(e) {
+          showToast('❌ 업로드 실패: ' + e.message, 'error');
+        }
+        setSyncing('');
+      }
+
+      async function downloadFromCloud() {
+        if (!fbConfig) { setShowFbModal(true); showToast('Firebase를 먼저 설정해주세요', 'warn'); return; }
+        setSyncing('down');
+        try {
+          const db = getFbDb();
+          const snap = await db.collection('workmanager').doc('main').get();
+          if (snap.exists) {
+            const data = JSON.parse(snap.data().tasks);
+            setTasks(data);
+            showToast(`📥 클라우드에서 불러왔습니다 (${data.length}건)`);
+          } else {
+            showToast('클라우드에 저장된 데이터가 없습니다', 'warn');
+          }
+        } catch(e) {
+          showToast('❌ 다운로드 실패: ' + e.message, 'error');
+        }
+        setSyncing('');
+      }
+
+      function copyURL() {
+        const url = window.location.href;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(url).then(()=>showToast('🔗 URL 복사 완료! 카카오톡에 붙여넣으세요')).catch(fallback);
+        } else { fallback(); }
+        function fallback() {
+          const el = document.createElement('textarea');
+          el.value = url; el.style.position='fixed'; el.style.opacity='0';
+          document.body.appendChild(el); el.select(); document.execCommand('copy');
+          document.body.removeChild(el);
+          showToast('🔗 URL 복사 완료! 카카오톡에 붙여넣으세요');
+        }
+      }
+
+      function saveFbConfig(cfg) {
+        setFbConfig(cfg);
+        localStorage.setItem('wm-fb', cfg ? JSON.stringify(cfg) : 'null');
+      }
+
+      // Filtered + sorted tasks
+      const visible = useMemo(()=>{
+        let r = [...tasks];
+        if (filters.category) r = r.filter(t=>t.category===filters.category);
+        if (filters.status)   r = r.filter(t=>t.status===filters.status);
+        if (filters.priority) r = r.filter(t=>t.priority===filters.priority);
+        if (filters.search) {
+          const q = filters.search.toLowerCase();
+          r = r.filter(t=>t.title.toLowerCase().includes(q)||(t.detail||'').toLowerCase().includes(q));
+        }
+        r.sort((a,b)=>{
+          const mul = sort.dir==='asc'?1:-1;
+          if (sort.field==='priority') return mul*(PRI_ORD[a.priority]-PRI_ORD[b.priority]);
+          return mul*(a[sort.field]||'').localeCompare(b[sort.field]||'');
+        });
+        return r;
+      }, [tasks, filters, sort]);
+
+      // Sync button helper
+      const syncBtn = (label, icon, onClick, active) => (
+        <button onClick={onClick} disabled={!!syncing}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+            ${active ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'}`}>
+          <span className={active?'animate-spin':''}>{icon}</span>
+          <span className="hidden sm:inline">{label}</span>
+        </button>
+      );
+
+      return (
+        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors duration-200">
+
+          {/* ── Header ── */}
+          <header className="sticky top-0 z-30 bg-white/90 dark:bg-slate-800/90 backdrop-blur border-b border-slate-200 dark:border-slate-700">
+            <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
+              {/* Title */}
+              <div className="flex items-center gap-2 min-w-0">
+                <img src="icon.svg" alt="" className="w-7 h-7 shrink-0"/>
+                <div className="min-w-0">
+                  <h1 className="font-extrabold text-slate-800 dark:text-white leading-tight text-sm sm:text-base truncate">업무현황 관리</h1>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">{tasks.length}건</p>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+
+                {/* URL 복사 */}
+                <button onClick={copyURL} title="URL 복사 (카카오톡 공유)"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
+                  🔗 <span className="hidden sm:inline">URL 복사</span>
+                </button>
+
+                {/* 기기 → 클라우드 */}
+                {syncBtn('기기→클라우드', syncing==='up'?'⏳':'☁️↑', uploadToCloud, syncing==='up')}
+
+                {/* 클라우드 → 기기 */}
+                {syncBtn('클라우드→기기', syncing==='down'?'⏳':'☁️↓', downloadFromCloud, syncing==='down')}
+
+                {/* Firebase 설정 */}
+                <button onClick={()=>setShowFbModal(true)} title="Firebase 설정 / 도움말"
+                  className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors text-sm
+                    ${fbConfig ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600'}`}>
+                  ⚙️
+                </button>
+
+                {/* CSV */}
+                <button onClick={()=>exportCSV(visible)} title="CSV 내보내기"
+                  className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-xl transition-colors">
+                  ⬇ <span className="hidden sm:inline">CSV</span>
+                </button>
+
+                {/* Dark mode */}
+                <button onClick={()=>setDark(d=>!d)}
+                  className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl transition-colors text-base">
+                  {dark?'☀️':'🌙'}
+                </button>
+              </div>
+            </div>
+
+            {/* Firebase status bar */}
+            {!fbConfig && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-400 text-center cursor-pointer"
+                onClick={()=>setShowFbModal(true)}>
+                ⚠️ Firebase 미설정 — 탭하여 설정하면 PC↔폰 동기화가 가능합니다
+              </div>
+            )}
+          </header>
+
+          {/* ── Main ── */}
+          <main className="max-w-7xl mx-auto px-3 sm:px-4 py-6">
+            <Dashboard tasks={tasks}/>
+            <FilterBar filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} onAdd={()=>setShowForm(true)}/>
+            <TaskTable tasks={visible} onSelect={setSelected}/>
+          </main>
+
+          {/* ── Modals / Panels ── */}
+          {showForm && <TaskForm onSave={addTask} onClose={()=>setShowForm(false)}/>}
+          {showFbModal && <FirebaseModal config={fbConfig} onSave={saveFbConfig} onClose={()=>setShowFbModal(false)}/>}
+          {selected && (
+            <TaskDetailPanel task={selected} onClose={()=>setSelected(null)}
+              onUpdate={updateTask} onDelete={deleteTask}/>
+          )}
+          <Toast toast={toast}/>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+
+  <!-- Service Worker registration (runs after page load) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js', { scope: './' })
+          .then(function(reg) {
+            console.log('[SW] Registered, scope:', reg.scope);
+            // Check for updates
+            reg.addEventListener('updatefound', function() {
+              const newSW = reg.installing;
+              newSW.addEventListener('statechange', function() {
+                if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[SW] New version available. Reload to update.');
+                }
+              });
+            });
+          })
+          .catch(function(err) {
+            console.warn('[SW] Registration failed:', err);
+          });
+      });
+    }
+  </script>
+</body>
+</html>
