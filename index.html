@@ -85,11 +85,16 @@
     // Parse Firebase config pasted by user (handles JS object or JSON)
     function parseFirebaseConfig(raw) {
       let s = raw.trim();
-      // Strip "const firebaseConfig = " prefix and trailing ";"
-      s = s.replace(/^.*?=\s*/, '').replace(/;?\s*$/, '');
-      // Convert JS object keys (no quotes) to JSON keys
-      s = s.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":');
-      // Replace single quotes with double quotes
+      // 1) { ... } 블록만 추출 (import문, const 선언, 주석 등 제거)
+      const start = s.indexOf('{');
+      const end   = s.lastIndexOf('}');
+      if (start === -1 || end === -1) throw new Error('{ } 블록을 찾을 수 없습니다');
+      s = s.slice(start, end + 1);
+      // 2) 먼저 JSON.parse 시도 (이미 올바른 JSON인 경우)
+      try { return JSON.parse(s); } catch(_) {}
+      // 3) JS 객체 리터럴 → JSON 변환
+      //    키 앞뒤(콤마 또는 { 뒤)의 unquoted 키만 처리, 값 내부 콜론은 건드리지 않음
+      s = s.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
       s = s.replace(/'/g, '"');
       return JSON.parse(s);
     }
