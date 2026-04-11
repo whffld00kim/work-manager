@@ -642,7 +642,7 @@ service cloud.firestore {
       const [selected,    setSelected]    = useState(null);
       const [showForm,    setShowForm]    = useState(false);
       const [showFbModal, setShowFbModal] = useState(false);
-      const [filters,     setFilters]     = useState({ category:'', status:'', priority:'', search:'' });
+      const [filters,     setFilters]     = useState({ category:'', status:'In Progress', priority:'', search:'' });
       const [sort,        setSort]        = useState({ field:'createdAt', dir:'desc' });
       const [syncing,     setSyncing]     = useState('');   // '' | 'up' | 'down'
       const [toast,       setToast]       = useState(null);
