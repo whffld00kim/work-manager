@@ -19,9 +19,6 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Firebase (compat SDK — global firebase object) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
   <script>tailwind.config = { darkMode: 'class' };</script>
 
@@ -82,21 +79,11 @@
       a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
       a.download = `업무현황_${today()}.csv`; a.click();
     }
-    // Parse Firebase config pasted by user (handles JS object or JSON)
-    function parseFirebaseConfig(raw) {
-      let s = raw.trim();
-      // 1) { ... } 블록만 추출 (import문, const 선언, 주석 등 제거)
-      const start = s.indexOf('{');
-      const end   = s.lastIndexOf('}');
-      if (start === -1 || end === -1) throw new Error('{ } 블록을 찾을 수 없습니다');
-      s = s.slice(start, end + 1);
-      // 2) 먼저 JSON.parse 시도 (이미 올바른 JSON인 경우)
-      try { return JSON.parse(s); } catch(_) {}
-      // 3) JS 객체 리터럴 → JSON 변환
-      //    키 앞뒤(콤마 또는 { 뒤)의 unquoted 키만 처리, 값 내부 콜론은 건드리지 않음
-      s = s.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
-      s = s.replace(/'/g, '"');
-      return JSON.parse(s);
+    function exportJSON(tasks) {
+      const json = JSON.stringify(tasks, null, 2);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json],{type:'application/json'}));
+      a.download = `업무현황_백업_${today()}.json`; a.click();
     }
 
     // ═══════════════════════════════════════════════════
@@ -487,145 +474,6 @@
     }
 
     // ═══════════════════════════════════════════════════
-    //  Firebase Settings Modal
-    // ═══════════════════════════════════════════════════
-    function FirebaseModal({ config, onSave, onClose }) {
-      const [tab, setTab]   = useState('config');
-      const [raw, setRaw]   = useState(config ? JSON.stringify(config, null, 2) : '');
-      const [err, setErr]   = useState('');
-      function handleSave() {
-        try {
-          const parsed = parseFirebaseConfig(raw);
-          if (!parsed.apiKey || !parsed.projectId) throw new Error('apiKey, projectId가 필요합니다.');
-          // Delete existing named app if config changed
-          try { firebase.app('wm').delete(); } catch(e) {}
-          onSave(parsed);
-          onClose();
-        } catch(e) {
-          setErr('파싱 오류: ' + e.message + '\n— Firebase 콘솔의 firebaseConfig 객체 전체를 붙여넣으세요.');
-        }
-      }
-      const tabCls = active => `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${active ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`;
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-              <h2 className="font-bold text-slate-800 dark:text-white">⚙️ 설정 / 가이드</h2>
-              <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">&times;</button>
-            </div>
-            {/* Tabs */}
-            <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0 overflow-x-auto">
-              <button className={tabCls(tab==='config')} onClick={()=>setTab('config')}>Firebase 설정</button>
-              <button className={tabCls(tab==='fbguide')} onClick={()=>setTab('fbguide')}>Firebase 가이드</button>
-              <button className={tabCls(tab==='github')} onClick={()=>setTab('github')}>GitHub Pages</button>
-            </div>
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6">
-
-              {/* ── Tab: Firebase 설정 ── */}
-              {tab==='config' && (
-                <div className="space-y-4">
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm ${config ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'}`}>
-                    {config ? '✅ Firebase 연결됨 — 동기화 버튼을 사용할 수 있습니다.' : '⚠️ Firebase 미설정 — 아래에 Config를 붙여넣으세요.'}
-                  </div>
-                  <div>
-                    <label className={labelCls}>Firebase Config 붙여넣기</label>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Firebase 콘솔 → 프로젝트 설정 → 내 앱 → SDK 설정 및 구성의 firebaseConfig 객체 전체를 붙여넣으세요.</p>
-                    <textarea value={raw} onChange={e=>{setRaw(e.target.value);setErr('');}} rows={10}
-                      placeholder={'{\n  "apiKey": "AIza...",\n  "authDomain": "your-app.firebaseapp.com",\n  "projectId": "your-project-id",\n  "storageBucket": "your-app.appspot.com",\n  "messagingSenderId": "123456789",\n  "appId": "1:123:web:abc"\n}'}
-                      className={`${inputCls} font-mono text-xs resize-none`}/>
-                    {err&&<p className="text-xs text-red-500 mt-1 whitespace-pre-wrap">{err}</p>}
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={handleSave} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl">저장</button>
-                    {config&&<button onClick={()=>{if(confirm('Firebase 설정을 삭제하시겠습니까?')){onSave(null);onClose();}}}
-                      className="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-semibold rounded-xl text-sm">삭제</button>}
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-400 space-y-1">
-                    <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Firestore 보안 규칙 (개인용)</div>
-                    <pre className="font-mono text-[11px] whitespace-pre-wrap">{`rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
-    }
-  }
-}`}</pre>
-                    <p>⬆ Firebase 콘솔 → Firestore → 규칙 탭에 붙여넣고 게시하세요.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Tab: Firebase 가이드 ── */}
-              {tab==='fbguide' && (
-                <div className="space-y-5">
-                  {[
-                    { n:1, title:'Firebase 콘솔 접속',
-                      body:'브라우저에서 console.firebase.google.com 으로 이동합니다.\nGoogle 계정으로 로그인하세요.' },
-                    { n:2, title:'새 프로젝트 만들기',
-                      body:'"프로젝트 추가" 클릭\n→ 프로젝트 이름 입력 (예: work-manager)\n→ Google Analytics는 "사용 설정 안함" 선택\n→ "프로젝트 만들기" 클릭 후 완료 대기' },
-                    { n:3, title:'웹 앱 추가',
-                      body:'프로젝트 홈 화면 상단의 </> 아이콘(웹) 클릭\n→ 앱 닉네임 입력 (예: 업무관리)\n→ "앱 등록" 클릭' },
-                    { n:4, title:'firebaseConfig 복사',
-                      body:'등록 후 표시되는 firebaseConfig 객체를\n"Firebase 설정" 탭의 텍스트 창에 붙여넣으세요.\n\n또는 나중에:\n프로젝트 설정(⚙️) → 내 앱 → SDK 설정 및 구성\n에서 다시 확인할 수 있습니다.' },
-                    { n:5, title:'Firestore 데이터베이스 생성',
-                      body:'좌측 메뉴 "빌드" → "Firestore Database"\n→ "데이터베이스 만들기" 클릭\n→ "테스트 모드에서 시작" 선택 (30일간 개방)\n→ 위치: asia-northeast3 (서울) 선택\n→ "완료"' },
-                    { n:6, title:'보안 규칙 설정 (영구 개방)',
-                      body:'Firestore Database → "규칙" 탭 클릭\n→ 기존 내용 삭제 후 "Firebase 설정" 탭의\n  보안 규칙을 붙여넣기\n→ "게시" 클릭\n\n이제 기기→클라우드, 클라우드→기기 동기화가\n가능합니다.' },
-                  ].map(({n,title,body})=>(
-                    <div key={n} className="flex gap-3">
-                      <div className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0 mt-0.5">{n}</div>
-                      <div>
-                        <div className="font-semibold text-slate-800 dark:text-white mb-1">{title}</div>
-                        <div className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-line leading-relaxed">{body}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* ── Tab: GitHub Pages ── */}
-              {tab==='github' && (
-                <div className="space-y-5">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-sm text-blue-700 dark:text-blue-300">
-                    💡 GitHub Pages에 배포하면 PC와 폰에서 같은 URL로 접속하고, 코드 수정 시 자동으로 폰 앱이 업데이트됩니다.
-                  </div>
-                  {[
-                    { n:1, title:'GitHub 계정 생성 / 로그인',
-                      body:'github.com 에서 계정을 만들거나 로그인합니다.' },
-                    { n:2, title:'새 저장소(Repository) 만들기',
-                      body:'"New repository" 클릭\n→ 저장소 이름: work-manager (영문)\n→ Public 선택 (GitHub Pages 무료 사용)\n→ "Create repository" 클릭' },
-                    { n:3, title:'파일 업로드',
-                      body:'저장소 페이지에서 "Add file" → "Upload files"\n→ 아래 파일들을 드래그앤드롭:\n  • index.html\n  • manifest.json\n  • sw.js\n  • icon.svg\n  • icon-maskable.svg\n→ "Commit changes" 클릭' },
-                    { n:4, title:'GitHub Pages 활성화',
-                      body:'저장소 → Settings 탭 → 좌측 "Pages"\n→ Source: "Deploy from a branch"\n→ Branch: main, / (root)\n→ Save\n\n배포까지 1~3분 소요됩니다.' },
-                    { n:5, title:'URL 확인 및 공유',
-                      body:'배포 완료 후 URL:\nhttps://[사용자명].github.io/work-manager/\n\n이 URL을 앱 상단의 "🔗 URL 복사" 버튼으로\n복사하여 카카오톡으로 공유하세요.' },
-                    { n:6, title:'갤럭시 폴드7에 앱 설치 (PWA)',
-                      body:'폰 Chrome에서 URL 접속\n→ 주소창 옆 ⋮ 메뉴\n→ "앱 설치" 또는 "홈 화면에 추가"\n→ 설치 완료!\n\n이후 홈 화면 아이콘으로 바로 실행 가능합니다.\n폴드 펼침/접힘 모두 대응합니다.' },
-                    { n:7, title:'자동 업데이트 방법',
-                      body:'PC에서 파일 수정 후 GitHub에 업로드(커밋)하면\n→ GitHub Pages가 자동으로 새 버전 배포\n→ 다음 앱 실행 시 최신 버전 자동 적용\n\n별도 앱스토어 업로드 없이 즉시 반영됩니다!' },
-                  ].map(({n,title,body})=>(
-                    <div key={n} className="flex gap-3">
-                      <div className="w-7 h-7 rounded-full bg-slate-600 text-white text-xs flex items-center justify-center font-bold shrink-0 mt-0.5">{n}</div>
-                      <div>
-                        <div className="font-semibold text-slate-800 dark:text-white mb-1">{title}</div>
-                        <div className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-line leading-relaxed">{body}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // ═══════════════════════════════════════════════════
     //  App (Root)
     // ═══════════════════════════════════════════════════
     function App() {
@@ -636,16 +484,12 @@ service cloud.firestore {
         localStorage.getItem('wm-dark')==='true' ||
         (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches)
       );
-      const [fbConfig, setFbConfig] = useState(()=>{
-        try { return JSON.parse(localStorage.getItem('wm-fb')||'null'); } catch { return null; }
-      });
-      const [selected,    setSelected]    = useState(null);
-      const [showForm,    setShowForm]    = useState(false);
-      const [showFbModal, setShowFbModal] = useState(false);
-      const [filters,     setFilters]     = useState({ category:'', status:'In Progress', priority:'', search:'' });
-      const [sort,        setSort]        = useState({ field:'createdAt', dir:'desc' });
-      const [syncing,     setSyncing]     = useState('');   // '' | 'up' | 'down'
-      const [toast,       setToast]       = useState(null);
+      const [selected,  setSelected]  = useState(null);
+      const [showForm,  setShowForm]  = useState(false);
+      const [filters,   setFilters]   = useState({ category:'', status:'In Progress', priority:'', search:'' });
+      const [sort,      setSort]      = useState({ field:'createdAt', dir:'desc' });
+      const [toast,     setToast]     = useState(null);
+      const importRef = useRef(null);
 
       // Persist
       useEffect(()=>{ localStorage.setItem('wm-tasks', JSON.stringify(tasks)); }, [tasks]);
@@ -670,49 +514,29 @@ service cloud.firestore {
       function updateTask(t)  { setTasks(p=>p.map(x=>x.id===t.id?t:x)); }
       function deleteTask(id) { setTasks(p=>p.filter(x=>x.id!==id)); setSelected(null); }
 
-      // Firebase helpers
-      function getFbDb() {
-        if (!fbConfig) throw new Error('Firebase 미설정');
-        let app;
-        try { app = firebase.app('wm'); }
-        catch { app = firebase.initializeApp(fbConfig, 'wm'); }
-        return firebase.firestore(app);
-      }
-
-      async function uploadToCloud() {
-        if (!fbConfig) { setShowFbModal(true); showToast('Firebase를 먼저 설정해주세요', 'warn'); return; }
-        setSyncing('up');
-        try {
-          const db = getFbDb();
-          await db.collection('workmanager').doc('main').set({
-            tasks: JSON.stringify(tasks),
-            updatedAt: new Date().toISOString(),
-            deviceCount: tasks.length,
-          });
-          showToast(`☁️ 클라우드에 저장했습니다 (${tasks.length}건)`);
-        } catch(e) {
-          showToast('❌ 업로드 실패: ' + e.message, 'error');
-        }
-        setSyncing('');
-      }
-
-      async function downloadFromCloud() {
-        if (!fbConfig) { setShowFbModal(true); showToast('Firebase를 먼저 설정해주세요', 'warn'); return; }
-        setSyncing('down');
-        try {
-          const db = getFbDb();
-          const snap = await db.collection('workmanager').doc('main').get();
-          if (snap.exists) {
-            const data = JSON.parse(snap.data().tasks);
-            setTasks(data);
-            showToast(`📥 클라우드에서 불러왔습니다 (${data.length}건)`);
-          } else {
-            showToast('클라우드에 저장된 데이터가 없습니다', 'warn');
+      // JSON 불러오기
+      function handleImport(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            if (!Array.isArray(data)) throw new Error('올바른 백업 파일이 아닙니다.');
+            if (!confirm(`${data.length}건의 데이터를 불러옵니다.\n현재 데이터는 유지되고 새 항목이 추가됩니다.\n계속하시겠습니까?`)) return;
+            // 중복 id 제외하고 병합
+            setTasks(prev => {
+              const existingIds = new Set(prev.map(t => t.id));
+              const newItems = data.filter(t => !existingIds.has(t.id));
+              return [...prev, ...newItems];
+            });
+            showToast(`📂 ${data.length}건 불러오기 완료`);
+          } catch(err) {
+            showToast('불러오기 실패: ' + err.message, 'error');
           }
-        } catch(e) {
-          showToast('❌ 다운로드 실패: ' + e.message, 'error');
-        }
-        setSyncing('');
+          e.target.value = ''; // 같은 파일 재선택 가능하도록 초기화
+        };
+        reader.readAsText(file);
       }
 
       function copyURL() {
@@ -727,11 +551,6 @@ service cloud.firestore {
           document.body.removeChild(el);
           showToast('🔗 URL 복사 완료! 카카오톡에 붙여넣으세요');
         }
-      }
-
-      function saveFbConfig(cfg) {
-        setFbConfig(cfg);
-        localStorage.setItem('wm-fb', cfg ? JSON.stringify(cfg) : 'null');
       }
 
       // Filtered + sorted tasks
@@ -751,16 +570,6 @@ service cloud.firestore {
         });
         return r;
       }, [tasks, filters, sort]);
-
-      // Sync button helper
-      const syncBtn = (label, icon, onClick, active) => (
-        <button onClick={onClick} disabled={!!syncing}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed
-            ${active ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'}`}>
-          <span className={active?'animate-spin':''}>{icon}</span>
-          <span className="hidden sm:inline">{label}</span>
-        </button>
-      );
 
       return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors duration-200">
@@ -786,21 +595,21 @@ service cloud.firestore {
                   🔗 <span className="hidden sm:inline">URL 복사</span>
                 </button>
 
-                {/* 기기 → 클라우드 */}
-                {syncBtn('기기→클라우드', syncing==='up'?'⏳':'☁️↑', uploadToCloud, syncing==='up')}
+                {/* 불러오기 */}
+                <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport}/>
+                <button onClick={()=>importRef.current.click()} title="JSON 백업 파일 불러오기"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
+                  📂 <span className="hidden sm:inline">불러오기</span>
+                </button>
 
-                {/* 클라우드 → 기기 */}
-                {syncBtn('클라우드→기기', syncing==='down'?'⏳':'☁️↓', downloadFromCloud, syncing==='down')}
-
-                {/* Firebase 설정 */}
-                <button onClick={()=>setShowFbModal(true)} title="Firebase 설정 / 도움말"
-                  className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors text-sm
-                    ${fbConfig ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600'}`}>
-                  ⚙️
+                {/* 내보내기 */}
+                <button onClick={()=>exportJSON(tasks)} title="JSON 백업 파일 내보내기"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
+                  💾 <span className="hidden sm:inline">내보내기</span>
                 </button>
 
                 {/* CSV */}
-                <button onClick={()=>exportCSV(visible)} title="CSV 내보내기"
+                <button onClick={()=>exportCSV(visible)} title="현재 목록을 CSV로 내보내기"
                   className="px-3 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-xl transition-colors">
                   ⬇ <span className="hidden sm:inline">CSV</span>
                 </button>
@@ -812,14 +621,6 @@ service cloud.firestore {
                 </button>
               </div>
             </div>
-
-            {/* Firebase status bar */}
-            {!fbConfig && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-400 text-center cursor-pointer"
-                onClick={()=>setShowFbModal(true)}>
-                ⚠️ Firebase 미설정 — 탭하여 설정하면 PC↔폰 동기화가 가능합니다
-              </div>
-            )}
           </header>
 
           {/* ── Main ── */}
@@ -831,7 +632,6 @@ service cloud.firestore {
 
           {/* ── Modals / Panels ── */}
           {showForm && <TaskForm onSave={addTask} onClose={()=>setShowForm(false)}/>}
-          {showFbModal && <FirebaseModal config={fbConfig} onSave={saveFbConfig} onClose={()=>setShowFbModal(false)}/>}
           {selected && (
             <TaskDetailPanel task={selected} onClose={()=>setSelected(null)}
               onUpdate={updateTask} onDelete={deleteTask}/>
