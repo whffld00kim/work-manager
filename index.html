@@ -232,20 +232,51 @@
         </div>
       );
       return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-700/50 text-left">
-                  {['발생일','구분','업무내용','목표일정','상태','우선순위','이력'].map(h=>(
-                    <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map(t=><TaskRow key={t.id} task={t} onClick={onSelect}/>)}
-              </tbody>
-            </table>
+        <>
+          {/* ── 넓은 화면(640px+): 테이블 ── */}
+          <div className="hidden sm:block bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-700/50 text-left">
+                    {['발생일','구분','업무내용','목표일정','상태','우선순위','이력'].map(h=>(
+                      <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map(t=><TaskRow key={t.id} task={t} onClick={onSelect}/>)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ── 좁은 화면(폴드 분할·커버): 카드 목록 ── */}
+          <div className="sm:hidden space-y-2">
+            {tasks.map(t=><TaskCard key={t.id} task={t} onClick={onSelect}/>)}
+          </div>
+        </>
+      );
+    }
+
+    function TaskCard({ task, onClick }) {
+      const dd = dday(task.targetDate, task.status);
+      return (
+        <div onClick={()=>onClick(task)}
+          className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-3 shadow-sm cursor-pointer active:bg-blue-50 dark:active:bg-slate-700/60 transition-colors">
+          <div className="flex flex-wrap items-center gap-1 mb-1.5">
+            <Badge cls={CAT_CLS[task.category]}>{task.category}</Badge>
+            <Badge cls={STAT_CLS[task.status]}>{task.status}</Badge>
+            <Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge>
+          </div>
+          <div className="font-medium text-slate-800 dark:text-white text-sm truncate">{task.title}</div>
+          {task.detail&&<div className="text-xs text-slate-400 truncate mt-0.5">{task.detail}</div>}
+          <div className="flex items-center justify-between mt-2 text-xs text-slate-400 dark:text-slate-500">
+            <span className="whitespace-nowrap">
+              {fmtDate(task.createdAt)} → {fmtDate(task.targetDate)}
+              {dd&&<span className={`ml-1 font-medium ${dd.cls}`}>{dd.text}</span>}
+            </span>
+            <span className="whitespace-nowrap shrink-0 ml-2">이력 {task.history?.length||0}건</span>
           </div>
         </div>
       );
