@@ -8,10 +8,10 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="업무관리" />
+  <meta name="apple-mobile-web-app-title" content="과제 관리자" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <title>업무현황 관리</title>
+  <title>과제 관리자</title>
 
   <!-- React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -19,6 +19,10 @@
   <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase (compat — book-tracker와 같은 버전) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
   <script>tailwind.config = { darkMode: 'class' };</script>
 
@@ -28,7 +32,6 @@
     ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 9999px; }
     .dark ::-webkit-scrollbar-thumb { background: #475569; }
     * { box-sizing: border-box; }
-    /* Safe area for Galaxy Fold / notched phones */
     body { padding-bottom: env(safe-area-inset-bottom); }
     header { padding-top: env(safe-area-inset-top); }
   </style>
@@ -36,678 +39,614 @@
 <body>
   <div id="root"></div>
 
+  <script>
+    // ═══ Firebase — minsung-buboo2 (민성 스케줄·Book Tracker와 같은 프로젝트) ═══
+    // 같은 계정으로 로그인해야 uid가 같아져서 개인일정 연동이 동작한다.
+    const firebaseConfig = {
+      apiKey: 'AIzaSyAPXiob8XeDunXpDMsLod_TwClqg2JL260',
+      authDomain: 'minsung-buboo2.firebaseapp.com',
+      databaseURL: 'https://minsung-buboo2-default-rtdb.asia-southeast1.firebasedatabase.app',
+      projectId: 'minsung-buboo2',
+      storageBucket: 'minsung-buboo2.firebasestorage.app',
+      messagingSenderId: '318424534715',
+      appId: '1:318424534715:web:50a3b43ea5c5325ee5239e'
+    };
+    firebase.initializeApp(firebaseConfig);
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
+  </script>
+
   <script type="text/babel" data-presets="react" data-type="application/javascript">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // ═══════════════════════════════════════════════════
-    //  Utilities
-    // ═══════════════════════════════════════════════════
-    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
-    function today() { return new Date().toISOString().slice(0, 10); }
-    function fmtDate(d) {
-      if (!d) return '─';
-      const [y, m, dd] = d.split('-');
-      return `${y}.${m}.${dd}`;
+    // ═══ 상수 ═══
+    const CATEGORIES = ['투자','가족','집·이사','자기계발','건강','앱개발','기타'];
+    const STATUSES   = ['대기','진행','보류','완료','중단'];
+    const ACTIVE_STATUSES = ['진행','대기','보류'];
+    const PRIORITIES = ['높음','보통','낮음'];
+
+    const CAT_COLORS = {
+      '투자':'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
+      '가족':'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
+      '집·이사':'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
+      '자기계발':'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300',
+      '건강':'bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300',
+      '앱개발':'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
+      '기타':'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+    };
+    const STATUS_COLORS = {
+      '진행':'bg-blue-500', '대기':'bg-slate-400', '보류':'bg-amber-400',
+      '완료':'bg-emerald-500', '중단':'bg-slate-500',
+    };
+    const PRIO_DOT = { '높음':'bg-red-500', '보통':'bg-amber-400', '낮음':'bg-slate-300 dark:bg-slate-600' };
+
+    const AUTH_ERRORS = {
+      'auth/invalid-email':'이메일 형식이 올바르지 않아요',
+      'auth/invalid-credential':'이메일 또는 비밀번호가 맞지 않아요',
+      'auth/wrong-password':'이메일 또는 비밀번호가 맞지 않아요',
+      'auth/user-not-found':'등록되지 않은 계정이에요',
+      'auth/too-many-requests':'시도가 너무 많아요. 잠시 후 다시 해주세요',
+      'auth/network-request-failed':'네트워크에 연결할 수 없어요',
+      'auth/unauthorized-domain':'이 주소가 Firebase 승인 도메인에 없어요',
+    };
+
+    // ═══ 유틸 ═══
+    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+    function today() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
+    function fmtDate(d) { return d ? d.replaceAll('-', '.') : '─'; }
     function dday(targetDate, status) {
-      if (!targetDate || status === 'Completed') return null;
-      const now = new Date(); now.setHours(0, 0, 0, 0);
+      if (!targetDate || status === '완료' || status === '중단') return null;
+      const now = new Date(); now.setHours(0,0,0,0);
       const t = new Date(targetDate + 'T00:00:00');
       const n = Math.floor((t - now) / 86400000);
-      if (n === 0) return { text: 'D-Day', cls: 'text-amber-500 font-bold' };
-      if (n > 0) return { text: `D-${n}`, cls: n <= 3 ? 'text-orange-500 font-semibold' : 'text-sky-500' };
-      return { text: `D+${Math.abs(n)} 초과`, cls: 'text-red-500 font-semibold' };
+      if (n === 0) return { text:'D-Day', cls:'text-amber-500 font-bold' };
+      if (n > 0)  return { text:`D-${n}`, cls: n <= 7 ? 'text-orange-500 font-semibold' : 'text-sky-500' };
+      return { text:`D+${Math.abs(n)}`, cls:'text-red-500 font-semibold' };
     }
-    function isThisWeek(d) {
-      if (!d) return false;
-      const now = new Date(); now.setHours(0, 0, 0, 0);
-      const dow = now.getDay();
-      const mon = new Date(now); mon.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-      const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23, 59, 59, 999);
-      return new Date(d + 'T00:00:00') >= mon && new Date(d + 'T00:00:00') <= sun;
+    function schedDate(s) {
+      const d = new Date(s.start);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
-    function exportCSV(tasks) {
-      const H = ['발생일','업무구분','업무내용','업무상세','목표일정','현재상태','달성일정','우선순위'];
-      const rows = tasks.map(t => [
-        t.createdAt, t.category,
-        `"${(t.title||'').replace(/"/g,'""')}"`,
-        `"${(t.detail||'').replace(/"/g,'""')}"`,
-        t.targetDate, t.status, t.completedAt||'', t.priority,
-      ]);
-      const csv = '\uFEFF' + [H,...rows].map(r=>r.join(',')).join('\n');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
-      a.download = `업무현황_${today()}.csv`; a.click();
-    }
-    function exportJSON(tasks) {
-      const json = JSON.stringify(tasks, null, 2);
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([json],{type:'application/json'}));
-      a.download = `업무현황_백업_${today()}.json`; a.click();
+    function schedDone(s) {
+      if (s.done) return true;
+      return Array.isArray(s.doneDates) && s.doneDates.includes(schedDate(s));
     }
 
-    // ═══════════════════════════════════════════════════
-    //  Constants
-    // ═══════════════════════════════════════════════════
-    const CATS  = ['Executive','Myself','Part Leader','etc'];
-    const STATS = ['In Progress','Completed'];
-    const PRIS  = ['High','Medium','Low'];
-    const PRI_ORD = { High:0, Medium:1, Low:2 };
-    const CAT_CLS = {
-      Executive:    'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
-      Myself:       'bg-sky-100    text-sky-800    dark:bg-sky-900/40    dark:text-sky-300',
-      'Part Leader':'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-      etc:          'bg-slate-100  text-slate-600  dark:bg-slate-700     dark:text-slate-300',
-    };
-    const STAT_CLS = {
-      'In Progress':'bg-blue-100   text-blue-700   dark:bg-blue-900/40   dark:text-blue-300',
-      Completed:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-    };
-    const PRI_CLS = {
-      High:  'bg-red-100   text-red-700   dark:bg-red-900/40   dark:text-red-300',
-      Medium:'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-      Low:   'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-    };
-
-    // ═══════════════════════════════════════════════════
-    //  Shared style helpers
-    // ═══════════════════════════════════════════════════
-    const inputCls = "w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition";
-    const labelCls = "block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1";
-    const selCls   = "px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500";
-
-    // ═══════════════════════════════════════════════════
-    //  Badge
-    // ═══════════════════════════════════════════════════
-    function Badge({ cls, children }) {
-      return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${cls}`}>{children}</span>;
-    }
-
-    // ═══════════════════════════════════════════════════
-    //  Toast
-    // ═══════════════════════════════════════════════════
+    // ═══ Toast ═══
     function Toast({ toast }) {
       if (!toast) return null;
-      const bg = toast.type === 'error' ? 'bg-red-500' : toast.type === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
+      const color = toast.type === 'error' ? 'bg-red-500' : 'bg-slate-800 dark:bg-slate-200 dark:text-slate-900';
       return (
-        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold text-white ${bg} max-w-xs text-center`}
-          style={{ bottom: 'calc(2rem + env(safe-area-inset-bottom))' }}>
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-white text-sm shadow-lg ${color}`}>
           {toast.msg}
         </div>
       );
     }
 
-    // ═══════════════════════════════════════════════════
-    //  Dashboard
-    // ═══════════════════════════════════════════════════
-    function Dashboard({ tasks }) {
-      const total   = tasks.length;
-      const inProg  = tasks.filter(t => t.status === 'In Progress').length;
-      const done    = tasks.filter(t => t.status === 'Completed').length;
-      const weekDue = tasks.filter(t => t.status !== 'Completed' && isThisWeek(t.targetDate)).length;
-      const catCnt  = Object.fromEntries(CATS.map(c => [c, tasks.filter(t => t.category === c).length]));
-      const maxCat  = Math.max(1, ...Object.values(catCnt));
-      return (
-        <div className="mb-5 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label:'전체',        val:total,   dot:'bg-slate-400'   },
-              { label:'In Progress', val:inProg,  dot:'bg-blue-500'    },
-              { label:'Completed',   val:done,    dot:'bg-emerald-500' },
-              { label:'금주 마감',   val:weekDue, dot:'bg-orange-500'  },
-            ].map(({ label, val, dot }) => (
-              <div key={label} className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-                <div className={`w-2.5 h-2.5 rounded-full ${dot} mb-2`}/>
-                <div className="text-2xl font-extrabold text-slate-800 dark:text-white">{val}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{label}</div>
-              </div>
-            ))}
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
-            <div className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">업무구분별</div>
-            <div className="space-y-2">
-              {CATS.map(c => (
-                <div key={c} className="flex items-center gap-3">
-                  <div className="w-24 shrink-0"><Badge cls={CAT_CLS[c]}>{c}</Badge></div>
-                  <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                    <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width:`${(catCnt[c]/maxCat)*100}%` }}/>
-                  </div>
-                  <div className="w-5 text-right text-sm font-bold text-slate-700 dark:text-slate-300">{catCnt[c]}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // ═══════════════════════════════════════════════════
-    //  FilterBar
-    // ═══════════════════════════════════════════════════
-    function FilterBar({ filters, setFilters, sort, setSort, onAdd }) {
-      return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 mb-4">
-          <div className="flex flex-wrap gap-2 items-center">
-            <input type="text" placeholder="🔍  업무내용 검색..." value={filters.search}
-              onChange={e=>setFilters(f=>({...f,search:e.target.value}))}
-              className={`flex-1 min-w-[160px] ${selCls}`}/>
-            <select value={filters.category} onChange={e=>setFilters(f=>({...f,category:e.target.value}))} className={selCls}>
-              <option value="">전체 구분</option>
-              {CATS.map(c=><option key={c}>{c}</option>)}
-            </select>
-            <select value={filters.status} onChange={e=>setFilters(f=>({...f,status:e.target.value}))} className={selCls}>
-              <option value="">전체 상태</option>
-              {STATS.map(s=><option key={s}>{s}</option>)}
-            </select>
-            <select value={filters.priority} onChange={e=>setFilters(f=>({...f,priority:e.target.value}))} className={selCls}>
-              <option value="">전체 우선순위</option>
-              {PRIS.map(p=><option key={p}>{p}</option>)}
-            </select>
-            <select value={`${sort.field}:${sort.dir}`}
-              onChange={e=>{const[field,dir]=e.target.value.split(':');setSort({field,dir});}} className={selCls}>
-              <option value="createdAt:desc">발생일 최신</option>
-              <option value="createdAt:asc">발생일 오래된</option>
-              <option value="targetDate:asc">목표일정 빠른</option>
-              <option value="targetDate:desc">목표일정 느린</option>
-              <option value="priority:asc">우선순위 높은</option>
-              <option value="priority:desc">우선순위 낮은</option>
-            </select>
-            <button onClick={onAdd}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors">
-              + 업무 등록
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // ═══════════════════════════════════════════════════
-    //  TaskTable + TaskRow
-    // ═══════════════════════════════════════════════════
-    function TaskTable({ tasks, onSelect }) {
-      if (!tasks.length) return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-16 text-center shadow-sm">
-          <div className="text-5xl mb-3">📋</div>
-          <div className="text-slate-400 dark:text-slate-500">등록된 업무가 없습니다</div>
-        </div>
-      );
-      return (
-        <>
-          {/* ── 넓은 화면(640px+): 테이블 ── */}
-          <div className="hidden sm:block bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-700/50 text-left">
-                    {['발생일','구분','업무내용','목표일정','상태','우선순위','이력'].map(h=>(
-                      <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {tasks.map(t=><TaskRow key={t.id} task={t} onClick={onSelect}/>)}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── 좁은 화면(폴드 분할·커버): 카드 목록 ── */}
-          <div className="sm:hidden space-y-2">
-            {tasks.map(t=><TaskCard key={t.id} task={t} onClick={onSelect}/>)}
-          </div>
-        </>
-      );
-    }
-
-    function TaskCard({ task, onClick }) {
-      const dd = dday(task.targetDate, task.status);
-      return (
-        <div onClick={()=>onClick(task)}
-          className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-3 shadow-sm cursor-pointer active:bg-blue-50 dark:active:bg-slate-700/60 transition-colors">
-          <div className="flex flex-wrap items-center gap-1 mb-1.5">
-            <Badge cls={CAT_CLS[task.category]}>{task.category}</Badge>
-            <Badge cls={STAT_CLS[task.status]}>{task.status}</Badge>
-            <Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge>
-          </div>
-          <div className="font-medium text-slate-800 dark:text-white text-sm truncate">{task.title}</div>
-          {task.detail&&<div className="text-xs text-slate-400 truncate mt-0.5">{task.detail}</div>}
-          <div className="flex items-center justify-between mt-2 text-xs text-slate-400 dark:text-slate-500">
-            <span className="whitespace-nowrap">
-              {fmtDate(task.createdAt)} → {fmtDate(task.targetDate)}
-              {dd&&<span className={`ml-1 font-medium ${dd.cls}`}>{dd.text}</span>}
-            </span>
-            <span className="whitespace-nowrap shrink-0 ml-2">이력 {task.history?.length||0}건</span>
-          </div>
-        </div>
-      );
-    }
-
-    function TaskRow({ task, onClick }) {
-      const dd = dday(task.targetDate, task.status);
-      return (
-        <tr onClick={()=>onClick(task)}
-          className="hover:bg-blue-50 dark:hover:bg-slate-700/60 cursor-pointer transition-colors border-b border-slate-100 dark:border-slate-700/60 last:border-0">
-          <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(task.createdAt)}</td>
-          <td className="px-4 py-3"><Badge cls={CAT_CLS[task.category]}>{task.category}</Badge></td>
-          <td className="px-4 py-3 max-w-xs">
-            <div className="font-medium text-slate-800 dark:text-white truncate">{task.title}</div>
-            {task.detail&&<div className="text-xs text-slate-400 truncate mt-0.5">{task.detail}</div>}
-          </td>
-          <td className="px-4 py-3 whitespace-nowrap">
-            <div className="text-slate-600 dark:text-slate-400">{fmtDate(task.targetDate)}</div>
-            {dd&&<div className={`text-xs mt-0.5 ${dd.cls}`}>{dd.text}</div>}
-          </td>
-          <td className="px-4 py-3"><Badge cls={STAT_CLS[task.status]}>{task.status}</Badge></td>
-          <td className="px-4 py-3"><Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge></td>
-          <td className="px-4 py-3 text-slate-400 dark:text-slate-500">{task.history?.length||0}건</td>
-        </tr>
-      );
-    }
-
-    // ═══════════════════════════════════════════════════
-    //  TaskForm Modal
-    // ═══════════════════════════════════════════════════
-    function TaskForm({ initial, onSave, onClose }) {
-      const isEdit = !!initial;
-      const [f, setF] = useState(initial ?? {
-        createdAt:today(), category:'Executive', title:'', detail:'',
-        targetDate:'', status:'In Progress', priority:'Medium', completedAt:'', history:[],
-      });
-      function set(k,v) {
-        setF(p=>{ const n={...p,[k]:v}; if(k==='status'&&v==='In Progress') n.completedAt=''; return n; });
+    // ═══ 로그인 화면 ═══
+    function Login() {
+      const [email, setEmail] = useState('');
+      const [pw, setPw] = useState('');
+      const [err, setErr] = useState('');
+      const [busy, setBusy] = useState(false);
+      function submit(e) {
+        e.preventDefault();
+        setBusy(true); setErr('');
+        firebase.auth().signInWithEmailAndPassword(email.trim(), pw)
+          .catch(ex => { setErr(AUTH_ERRORS[ex.code] || '로그인에 실패했어요'); setBusy(false); });
       }
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 px-6">
+          <form onSubmit={submit} className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow p-6 space-y-4">
+            <div className="text-center space-y-1">
+              <div className="text-3xl">📋</div>
+              <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">과제 관리자</h1>
+              <p className="text-xs text-slate-400">민성 스케줄과 같은 계정으로 로그인하세요 (일정 연동)</p>
+            </div>
+            <input type="email" required placeholder="이메일" value={email} onChange={e=>setEmail(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100" />
+            <input type="password" required placeholder="비밀번호" value={pw} onChange={e=>setPw(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100" />
+            {err && <p className="text-xs text-red-500">{err}</p>}
+            <button disabled={busy} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">
+              {busy ? '로그인 중…' : '로그인'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    // ═══ 새 과제 폼 ═══
+    function TaskForm({ onSave, onClose }) {
+      const [f, setF] = useState({ title:'', category:CATEGORIES[0], status:'진행', priority:'보통', dueDate:'', firstLog:'' });
       function submit(e) {
         e.preventDefault();
         if (!f.title.trim()) return;
-        onSave({...f, id:f.id||genId(), history:f.history||[]});
+        const now = Date.now();
+        const task = {
+          id: genId(), title: f.title.trim(), category: f.category, status: f.status,
+          priority: f.priority, dueDate: f.dueDate || null,
+          checklist: [], log: f.firstLog.trim() ? [{ id: genId(), date: today(), text: f.firstLog.trim() }] : [],
+          createdAt: now, updatedAt: now, completedAt: null,
+        };
+        onSave(task);
         onClose();
       }
+      const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-              <h2 className="font-bold text-slate-800 dark:text-white">{isEdit?'업무 편집':'업무 등록'}</h2>
-              <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">&times;</button>
+        <div className="fixed inset-0 z-40 bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+          <form onSubmit={submit} onClick={e=>e.stopPropagation()}
+            className="w-full sm:max-w-md bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+            <h2 className="font-bold text-slate-800 dark:text-slate-100">새 과제</h2>
+            <input autoFocus required placeholder="과제 제목" value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
+            <div className="grid grid-cols-2 gap-2">
+              <select value={f.category} onChange={e=>setF({...f, category:e.target.value})} className={inputCls}>
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+              <select value={f.priority} onChange={e=>setF({...f, priority:e.target.value})} className={inputCls}>
+                {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+              </select>
             </div>
-            <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={labelCls}>발생일 *</label>
-                  <input type="date" required value={f.createdAt} onChange={e=>set('createdAt',e.target.value)} className={inputCls}/></div>
-                <div><label className={labelCls}>목표일정 *</label>
-                  <input type="date" required value={f.targetDate} onChange={e=>set('targetDate',e.target.value)} className={inputCls}/></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={labelCls}>업무구분 *</label>
-                  <select value={f.category} onChange={e=>set('category',e.target.value)} className={inputCls}>
-                    {CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-                <div><label className={labelCls}>우선순위 *</label>
-                  <select value={f.priority} onChange={e=>set('priority',e.target.value)} className={inputCls}>
-                    {PRIS.map(p=><option key={p}>{p}</option>)}</select></div>
-              </div>
-              <div><label className={labelCls}>업무내용 *</label>
-                <input type="text" required placeholder="업무 제목을 입력하세요" value={f.title} onChange={e=>set('title',e.target.value)} className={inputCls}/></div>
-              <div><label className={labelCls}>업무 상세 <span className="font-normal text-slate-400">(선택)</span></label>
-                <textarea rows={3} value={f.detail} onChange={e=>set('detail',e.target.value)} className={`${inputCls} resize-none`}/></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={labelCls}>현재상태</label>
-                  <select value={f.status} onChange={e=>set('status',e.target.value)} className={inputCls}>
-                    {STATS.map(s=><option key={s}>{s}</option>)}</select></div>
-                <div><label className={labelCls}>달성일정 {f.status==='Completed'&&<span className="text-red-400">*</span>}</label>
-                  <input type="date" disabled={f.status!=='Completed'} value={f.completedAt||''} onChange={e=>set('completedAt',e.target.value)}
-                    className={`${inputCls} disabled:opacity-40 disabled:cursor-not-allowed`}/></div>
-              </div>
-              <div className="flex gap-3 pb-1">
-                <button type="submit" className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl">{isEdit?'수정 완료':'등록'}</button>
-                <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-bold text-sm rounded-xl">취소</button>
-              </div>
-            </form>
-          </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={f.status} onChange={e=>setF({...f, status:e.target.value})} className={inputCls}>
+                {ACTIVE_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+              <input type="date" value={f.dueDate} onChange={e=>setF({...f, dueDate:e.target.value})} className={inputCls} title="목표 기한 (선택)" />
+            </div>
+            <textarea placeholder="첫 진행 기록 (선택)" value={f.firstLog} onChange={e=>setF({...f, firstLog:e.target.value})} rows="2" className={inputCls} />
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300">취소</button>
+              <button className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold">추가</button>
+            </div>
+          </form>
         </div>
       );
     }
 
-    // ═══════════════════════════════════════════════════
-    //  HistoryTimeline
-    // ═══════════════════════════════════════════════════
-    function HistoryTimeline({ history, onAdd, onDelete }) {
-      const [dt, setDt]     = useState(today);
-      const [note, setNote] = useState('');
-      function add() { if (!note.trim()) return; onAdd({date:dt,note:note.trim()}); setNote(''); }
-      const sorted = [...(history||[])].sort((a,b)=>a.date.localeCompare(b.date));
-      return (
-        <div>
-          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">진행이력</div>
-          <div className="flex gap-2 mb-4">
-            <input type="date" value={dt} onChange={e=>setDt(e.target.value)}
-              className="px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"/>
-            <input type="text" value={note} onChange={e=>setNote(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()}
-              placeholder="이력 메모 (Enter)"
-              className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
-            <button onClick={add} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">추가</button>
-          </div>
-          {!sorted.length
-            ? <p className="text-xs text-center text-slate-400 py-4">이력이 없습니다</p>
-            : <div className="relative pl-6">
-                <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-slate-200 dark:bg-slate-700 rounded-full"/>
-                <div className="space-y-3">
-                  {sorted.map((item,i)=>(
-                    <div key={i} className="relative flex items-start gap-2">
-                      <div className="absolute -left-4 top-1.5 w-3 h-3 rounded-full bg-blue-500 ring-2 ring-white dark:ring-slate-800 shrink-0"/>
-                      <div className="flex-1 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-2.5 min-w-0">
-                        <div className="text-xs text-slate-400 mb-0.5">{fmtDate(item.date)}</div>
-                        <div className="text-sm text-slate-700 dark:text-slate-200 break-words">{item.note}</div>
-                      </div>
-                      <button onClick={()=>onDelete(i)}
-                        className="shrink-0 mt-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 text-lg leading-none">×</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-          }
-        </div>
-      );
-    }
-
-    // ═══════════════════════════════════════════════════
-    //  TaskDetailPanel
-    // ═══════════════════════════════════════════════════
-    function TaskDetailPanel({ task, onClose, onUpdate, onDelete }) {
+    // ═══ 과제 상세 패널 ═══
+    function TaskDetail({ task, schedules, onUpdate, onDelete, onClose, onSendSchedule }) {
       const [editing, setEditing] = useState(false);
       const [f, setF] = useState(task);
-      useEffect(()=>{ setF(task); setEditing(false); }, [task?.id]);
-      if (!task) return null;
-      function set(k,v) { setF(p=>{ const n={...p,[k]:v}; if(k==='status'&&v==='In Progress') n.completedAt=''; return n; }); }
-      function save() { onUpdate(f); setEditing(false); }
-      function addHistory(item) { const updated={...task,history:[...(task.history||[]),item]}; onUpdate(updated); }
-      function delHistory(idx)  { const h=[...(task.history||[])]; h.splice(idx,1); onUpdate({...task,history:h}); }
-      const dd = dday(task.targetDate, task.status);
+      const [newLog, setNewLog] = useState('');
+      const [logDate, setLogDate] = useState(today());
+      const [newCheck, setNewCheck] = useState('');
+      const [schedOpen, setSchedOpen] = useState(false);
+      const [schedDateV, setSchedDateV] = useState(today());
+      const [schedTime, setSchedTime] = useState('');
+      useEffect(()=>{ setF(task); }, [task]);
+
+      const linked = useMemo(() =>
+        schedules.filter(s => (s.memo || '').includes(`[과제:${task.id}]`)).sort((a,b)=>b.start-a.start),
+        [schedules, task.id]);
+
+      const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
+
+      function saveEdit() {
+        onUpdate({ ...task, title:f.title.trim()||task.title, category:f.category, priority:f.priority,
+          dueDate:f.dueDate||null, updatedAt:Date.now() });
+        setEditing(false);
+      }
+      function setStatus(st) {
+        onUpdate({ ...task, status: st, completedAt: st==='완료' ? Date.now() : null, updatedAt: Date.now() });
+      }
+      function addLog() {
+        if (!newLog.trim()) return;
+        const log = [...(task.log||[]), { id:genId(), date:logDate, text:newLog.trim() }];
+        onUpdate({ ...task, log, updatedAt: Date.now() });
+        setNewLog('');
+      }
+      function delLog(id) {
+        if (!confirm('이 기록을 지울까요?')) return;
+        onUpdate({ ...task, log:(task.log||[]).filter(l=>l.id!==id), updatedAt:Date.now() });
+      }
+      function addCheck() {
+        if (!newCheck.trim()) return;
+        const checklist = [...(task.checklist||[]), { id:genId(), text:newCheck.trim(), done:false, doneDate:null }];
+        onUpdate({ ...task, checklist, updatedAt: Date.now() });
+        setNewCheck('');
+      }
+      function toggleCheck(id) {
+        const checklist = (task.checklist||[]).map(c =>
+          c.id===id ? { ...c, done:!c.done, doneDate: !c.done ? today() : null } : c);
+        onUpdate({ ...task, checklist, updatedAt: Date.now() });
+      }
+      function delCheck(id) {
+        onUpdate({ ...task, checklist:(task.checklist||[]).filter(c=>c.id!==id), updatedAt:Date.now() });
+      }
+      function sendSchedule() {
+        onSendSchedule(task, schedDateV, schedTime);
+        setSchedOpen(false); setSchedTime('');
+      }
+
+      const checklist = task.checklist || [];
+      const log = [...(task.log||[])].sort((a,b)=> b.date.localeCompare(a.date) || (b.id>a.id?1:-1));
+      const doneCount = checklist.filter(c=>c.done).length;
+
       return (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="flex-1 bg-black/30 backdrop-blur-sm" onClick={onClose}/>
-          <div className="w-full max-w-md bg-white dark:bg-slate-800 shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge cls={STAT_CLS[task.status]}>{task.status}</Badge>
-                <Badge cls={PRI_CLS[task.priority]}>{task.priority}</Badge>
-                {dd&&<span className={`text-xs ${dd.cls}`}>{dd.text}</span>}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {!editing&&<button onClick={()=>setEditing(true)}
-                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg">편집</button>}
-                <button onClick={()=>{if(confirm('삭제하시겠습니까?'))onDelete(task.id);}}
-                  className="px-3 py-1.5 text-xs bg-red-100 hover:bg-red-200 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-lg">삭제</button>
-                <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">&times;</button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+        <div className="fixed inset-0 z-30 bg-black/40 flex justify-end" onClick={onClose}>
+          <div onClick={e=>e.stopPropagation()}
+            className="w-full sm:max-w-lg h-full bg-slate-50 dark:bg-slate-900 overflow-y-auto shadow-2xl">
+            {/* 헤더 */}
+            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
+              <button onClick={onClose} className="text-slate-400 text-xl px-1">←</button>
               {editing ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className={labelCls}>발생일</label>
-                      <input type="date" value={f.createdAt} onChange={e=>set('createdAt',e.target.value)} className={inputCls}/></div>
-                    <div><label className={labelCls}>목표일정</label>
-                      <input type="date" value={f.targetDate} onChange={e=>set('targetDate',e.target.value)} className={inputCls}/></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className={labelCls}>업무구분</label>
-                      <select value={f.category} onChange={e=>set('category',e.target.value)} className={inputCls}>
-                        {CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-                    <div><label className={labelCls}>우선순위</label>
-                      <select value={f.priority} onChange={e=>set('priority',e.target.value)} className={inputCls}>
-                        {PRIS.map(p=><option key={p}>{p}</option>)}</select></div>
-                  </div>
-                  <div><label className={labelCls}>업무내용</label>
-                    <input type="text" value={f.title} onChange={e=>set('title',e.target.value)} className={inputCls}/></div>
-                  <div><label className={labelCls}>업무 상세</label>
-                    <textarea rows={3} value={f.detail||''} onChange={e=>set('detail',e.target.value)} className={`${inputCls} resize-none`}/></div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className={labelCls}>현재상태</label>
-                      <select value={f.status} onChange={e=>set('status',e.target.value)} className={inputCls}>
-                        {STATS.map(s=><option key={s}>{s}</option>)}</select></div>
-                    <div><label className={labelCls}>달성일정</label>
-                      <input type="date" disabled={f.status!=='Completed'} value={f.completedAt||''} onChange={e=>set('completedAt',e.target.value)}
-                        className={`${inputCls} disabled:opacity-40 disabled:cursor-not-allowed`}/></div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={save} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl">저장</button>
-                    <button onClick={()=>{setEditing(false);setF(task);}} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-sm rounded-xl">취소</button>
-                  </div>
-                </div>
+                <input value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
               ) : (
-                <div className="space-y-4">
-                  <div>
-                    <div className="text-xs text-slate-400 mb-1">업무내용</div>
-                    <div className="text-base font-bold text-slate-800 dark:text-white">{task.title}</div>
-                    {task.detail&&<div className="mt-2 text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">{task.detail}</div>}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {[['발생일',fmtDate(task.createdAt)],['목표일정',fmtDate(task.targetDate)],['달성일정',task.completedAt?fmtDate(task.completedAt):'─']].map(([k,v])=>(
-                      <div key={k} className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3">
-                        <div className="text-xs text-slate-400 mb-0.5">{k}</div>
-                        <div className="font-medium text-slate-700 dark:text-slate-200">{v}</div>
-                      </div>
-                    ))}
-                    <div className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3">
-                      <div className="text-xs text-slate-400 mb-1">업무구분</div>
-                      <Badge cls={CAT_CLS[task.category]}>{task.category}</Badge>
-                    </div>
-                  </div>
-                </div>
+                <h2 className="flex-1 font-bold text-slate-800 dark:text-slate-100 truncate">{task.title}</h2>
               )}
-              <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
-                <HistoryTimeline history={task.history} onAdd={addHistory} onDelete={delHistory}/>
+              {editing
+                ? <button onClick={saveEdit} className="text-sm font-semibold text-blue-600 px-2">저장</button>
+                : <button onClick={()=>setEditing(true)} className="text-sm text-slate-400 px-2">편집</button>}
+            </div>
+
+            <div className="p-4 space-y-5">
+              {/* 기본 정보 */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+                {editing ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={f.category} onChange={e=>setF({...f, category:e.target.value})} className={inputCls}>
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <select value={f.priority} onChange={e=>setF({...f, priority:e.target.value})} className={inputCls}>
+                      {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                    <input type="date" value={f.dueDate||''} onChange={e=>setF({...f, dueDate:e.target.value})} className={`${inputCls} col-span-2`} />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${CAT_COLORS[task.category]||CAT_COLORS['기타']}`}>{task.category}</span>
+                    <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span className={`w-2 h-2 rounded-full ${PRIO_DOT[task.priority]}`}></span>{task.priority}
+                    </span>
+                    <span className="text-xs text-slate-400">기한 {fmtDate(task.dueDate)}</span>
+                    {dday(task.dueDate, task.status) && <span className={`text-xs ${dday(task.dueDate, task.status).cls}`}>{dday(task.dueDate, task.status).text}</span>}
+                  </div>
+                )}
+                {/* 상태 버튼 */}
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUSES.map(st => (
+                    <button key={st} onClick={()=>setStatus(st)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition
+                        ${task.status===st
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400'}`}>
+                      {st}
+                    </button>
+                  ))}
+                </div>
+                {task.completedAt && <p className="text-xs text-emerald-600 dark:text-emerald-400">✓ {new Date(task.completedAt).toLocaleDateString('ko-KR')} 완료</p>}
               </div>
+
+              {/* 체크리스트 */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">체크리스트</h3>
+                  {checklist.length > 0 && <span className="text-xs text-slate-400">{doneCount}/{checklist.length}</span>}
+                </div>
+                {checklist.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 group">
+                    <button onClick={()=>toggleCheck(c.id)}
+                      className={`w-5 h-5 rounded-md border flex items-center justify-center text-xs shrink-0
+                        ${c.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
+                      {c.done ? '✓' : ''}
+                    </button>
+                    <span className={`flex-1 text-sm ${c.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}>{c.text}</span>
+                    {c.done && c.doneDate && <span className="text-[10px] text-slate-400">{fmtDate(c.doneDate)}</span>}
+                    <button onClick={()=>delCheck(c.id)} className="text-slate-300 dark:text-slate-600 hover:text-red-400 text-xs px-1">✕</button>
+                  </div>
+                ))}
+                <div className="flex gap-2 pt-1">
+                  <input placeholder="하위 단계 추가" value={newCheck} onChange={e=>setNewCheck(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); addCheck(); } }} className={inputCls} />
+                  <button onClick={addCheck} className="px-3 rounded-lg bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300">＋</button>
+                </div>
+              </div>
+
+              {/* 일정으로 보내기 + 연동된 일정 */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">📅 일정 연동 <span className="font-normal text-xs text-slate-400">(민성 스케줄)</span></h3>
+                  <button onClick={()=>setSchedOpen(!schedOpen)} className="text-xs font-medium text-blue-600 dark:text-blue-400">일정으로 보내기</button>
+                </div>
+                {schedOpen && (
+                  <div className="flex flex-wrap gap-2 items-center bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <input type="date" value={schedDateV} onChange={e=>setSchedDateV(e.target.value)} className={`${inputCls} !w-auto flex-1`} />
+                    <input type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} className={`${inputCls} !w-auto`} title="비우면 종일" />
+                    <button onClick={sendSchedule} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold">보내기</button>
+                  </div>
+                )}
+                {linked.length === 0
+                  ? <p className="text-xs text-slate-400">아직 연동된 일정이 없습니다. 실행할 날을 정하면 일정 앱에 나타납니다.</p>
+                  : linked.map(s => (
+                    <div key={s.id} className="flex items-center gap-2 text-sm">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${schedDone(s) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}></span>
+                      <span className="text-slate-600 dark:text-slate-300">{fmtDate(schedDate(s))}</span>
+                      <span className="flex-1 truncate text-slate-500 dark:text-slate-400">{s.title}</span>
+                      {schedDone(s) && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">완료</span>}
+                    </div>
+                  ))}
+              </div>
+
+              {/* 진행 로그 */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">진행 로그 <span className="font-normal text-xs text-slate-400">({log.length})</span></h3>
+                <div className="space-y-1.5">
+                  <div className="flex gap-2">
+                    <input type="date" value={logDate} onChange={e=>setLogDate(e.target.value)} className={`${inputCls} !w-auto`} />
+                    <button onClick={addLog} className="px-3 rounded-lg bg-blue-600 text-white text-sm font-semibold ml-auto">기록</button>
+                  </div>
+                  <textarea placeholder="오늘 진행한 내용…" value={newLog} onChange={e=>setNewLog(e.target.value)} rows="2" className={inputCls} />
+                </div>
+                <div className="space-y-3 pt-1">
+                  {log.map(l => (
+                    <div key={l.id} className="flex gap-3 group">
+                      <div className="flex flex-col items-center">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0"></span>
+                        <span className="flex-1 w-px bg-slate-200 dark:bg-slate-700"></span>
+                      </div>
+                      <div className="flex-1 pb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-slate-400">{fmtDate(l.date)}</span>
+                          <button onClick={()=>delLog(l.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 text-xs">✕</button>
+                        </div>
+                        <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{l.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {log.length === 0 && <p className="text-xs text-slate-400">진행 기록이 여기에 쌓입니다.</p>}
+                </div>
+              </div>
+
+              {/* 삭제 */}
+              <button onClick={()=>{ if(confirm('이 과제를 이력까지 전부 삭제할까요?\n(완료 처리만 하려면 상태를 "완료"로 바꾸세요)')) onDelete(task.id); }}
+                className="w-full py-2.5 rounded-xl border border-red-200 dark:border-red-900 text-red-500 text-sm">과제 삭제</button>
+              <p className="text-center text-[10px] text-slate-300 dark:text-slate-600 pb-4">
+                생성 {new Date(task.createdAt).toLocaleDateString('ko-KR')}
+              </p>
             </div>
           </div>
         </div>
       );
     }
 
-    // ═══════════════════════════════════════════════════
-    //  App (Root)
-    // ═══════════════════════════════════════════════════
-    function App() {
-      const [tasks, setTasks] = useState(()=>{
-        try { return JSON.parse(localStorage.getItem('wm-tasks')||'[]'); } catch { return []; }
-      });
-      const [dark, setDark] = useState(()=>
-        localStorage.getItem('wm-dark')==='true' ||
-        (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches)
+    // ═══ 과제 카드 ═══
+    function TaskCard({ task, onSelect }) {
+      const checklist = task.checklist || [];
+      const doneCount = checklist.filter(c=>c.done).length;
+      const pct = checklist.length ? Math.round(doneCount / checklist.length * 100) : null;
+      const lastLog = (task.log||[]).reduce((m,l)=> l.date > m ? l.date : m, '');
+      const dd = dday(task.dueDate, task.status);
+      return (
+        <button onClick={()=>onSelect(task)}
+          className="w-full text-left bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition space-y-2">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[task.status]}`}></span>
+            <span className="flex-1 font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{task.title}</span>
+            {dd && <span className={`text-xs shrink-0 ${dd.cls}`}>{dd.text}</span>}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${CAT_COLORS[task.category]||CAT_COLORS['기타']}`}>{task.category}</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${PRIO_DOT[task.priority]}`}></span>
+            <span>{task.status}</span>
+            {lastLog && <span className="ml-auto">최근 기록 {fmtDate(lastLog)}</span>}
+          </div>
+          {pct !== null && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: pct + '%' }}></div>
+              </div>
+              <span className="text-[10px] text-slate-400">{doneCount}/{checklist.length}</span>
+            </div>
+          )}
+        </button>
       );
-      const [selected,  setSelected]  = useState(null);
-      const [showForm,  setShowForm]  = useState(false);
-      const [filters,   setFilters]   = useState({ category:'', status:'In Progress', priority:'', search:'' });
-      const [sort,      setSort]      = useState({ field:'createdAt', dir:'desc' });
-      const [toast,     setToast]     = useState(null);
-      const importRef = useRef(null);
+    }
 
-      // Persist
-      useEffect(()=>{ localStorage.setItem('wm-tasks', JSON.stringify(tasks)); }, [tasks]);
+    // ═══ 메인 앱 ═══
+    function Main({ user }) {
+      const [tasks, setTasks] = useState([]);
+      const [schedules, setSchedules] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [tab, setTab] = useState('active');           // active | archive
+      const [catFilter, setCatFilter] = useState('');
+      const [selected, setSelected] = useState(null);
+      const [showForm, setShowForm] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [dark, setDark] = useState(()=> localStorage.getItem('wm-dark')==='true' ||
+        (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches));
+
+      const uid = user.uid;
+      const tasksRef = () => firebase.database().ref(`long-tasks/${uid}/tasks`);
+
+      useEffect(()=>{
+        Promise.all([
+          tasksRef().once('value'),
+          firebase.database().ref(`personal-schedules/${uid}`).once('value'),
+        ]).then(([t, s]) => {
+          setTasks(Object.values(t.val() || {}));
+          setSchedules(Object.entries(s.val() || {}).map(([id, v]) => ({ ...v, id })));
+          setLoaded(true);
+        }).catch(e => { showToast('불러오기 실패: ' + e.message, 'error'); setLoaded(true); });
+      }, []);
+
       useEffect(()=>{
         localStorage.setItem('wm-dark', dark);
         document.documentElement.classList.toggle('dark', dark);
       }, [dark]);
+
       useEffect(()=>{
         if (selected) {
           const fresh = tasks.find(t=>t.id===selected.id);
-          if (fresh) setSelected(fresh);
+          if (fresh && fresh !== selected) setSelected(fresh);
         }
       }, [tasks]);
 
-      // ── 안드로이드 뒤로 스와이프(백 제스처) 처리 (2026-08-28) ──
-      // standalone PWA는 히스토리가 비어 있어 백 제스처가 곧 앱 종료였다.
-      // 여분 히스토리 한 칸을 항상 유지하고, popstate가 오면 "열린 창 닫기"로 동작을 바꾼다.
-      // 종료는 홈 버튼/최근 앱으로만 한다.
+      function showToast(msg, type='success') {
+        setToast({ msg, type });
+        setTimeout(()=>setToast(null), 3000);
+      }
+
+      // ── CRUD (RTDB에 곧바로 쓰고 로컬 상태 갱신) ──
+      function saveTask(task) {
+        tasksRef().child(task.id).set(task)
+          .catch(e => showToast('저장 실패: ' + e.message, 'error'));
+        setTasks(p => p.some(t=>t.id===task.id) ? p.map(t=>t.id===task.id?task:t) : [task, ...p]);
+      }
+      function deleteTask(id) {
+        tasksRef().child(id).remove().catch(e => showToast('삭제 실패: ' + e.message, 'error'));
+        setTasks(p => p.filter(t=>t.id!==id));
+        setSelected(null);
+      }
+      function sendSchedule(task, dateStr, timeStr) {
+        let start, end, allDay;
+        if (timeStr) {
+          start = new Date(`${dateStr}T${timeStr}:00`).getTime();
+          end = start + 3600000; allDay = false;
+        } else {
+          start = new Date(`${dateStr}T00:00:00`).getTime();
+          end = new Date(`${dateStr}T23:59:59`).getTime(); allDay = true;
+        }
+        const rec = {
+          title: task.title, start, end, allDay, repeat: 'none',
+          done: false, location: '', memo: `[과제:${task.id}] 과제 관리자에서 보냄`,
+          createdAt: Date.now(),
+        };
+        const ref = firebase.database().ref(`personal-schedules/${uid}`).push();
+        ref.set(rec)
+          .then(()=> showToast(`${fmtDate(dateStr)} 일정으로 보냈습니다 📅`))
+          .catch(e => showToast('일정 전송 실패: ' + e.message, 'error'));
+        setSchedules(p => [...p, { ...rec, id: ref.key }]);
+      }
+
+      // ── 뒤로 스와이프: 열린 창 닫기 (앱 종료 방지) ──
       const backRef = useRef(null);
       backRef.current = { showForm, selected };
       useEffect(()=>{
         history.pushState({ wm: 1 }, '');
         const onPop = () => {
           const s = backRef.current || {};
-          if (s.showForm) setShowForm(false);        // 1순위: 새 업무 폼 닫기
-          else if (s.selected) setSelected(null);    // 2순위: 상세 패널 닫기
-          // 둘 다 닫혀 있으면 아무것도 하지 않는다 = 앱에 머문다
-          history.pushState({ wm: 1 }, '');          // 다음 제스처를 위해 여분 칸을 다시 채운다
+          if (s.showForm) setShowForm(false);
+          else if (s.selected) setSelected(null);
+          history.pushState({ wm: 1 }, '');
         };
         window.addEventListener('popstate', onPop);
         return () => window.removeEventListener('popstate', onPop);
       }, []);
 
-      function showToast(msg, type='success') {
-        setToast({ msg, type });
-        setTimeout(()=>setToast(null), 3500);
-      }
-
-      // CRUD
-      function addTask(t)     { setTasks(p=>[t,...p]); }
-      function updateTask(t)  { setTasks(p=>p.map(x=>x.id===t.id?t:x)); }
-      function deleteTask(id) { setTasks(p=>p.filter(x=>x.id!==id)); setSelected(null); }
-
-      // JSON 불러오기
-      function handleImport(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = ev => {
-          try {
-            const data = JSON.parse(ev.target.result);
-            if (!Array.isArray(data)) throw new Error('올바른 백업 파일이 아닙니다.');
-            if (!confirm(`${data.length}건의 데이터를 불러옵니다.\n현재 데이터는 유지되고 새 항목이 추가됩니다.\n계속하시겠습니까?`)) return;
-            // 중복 id 제외하고 병합
-            setTasks(prev => {
-              const existingIds = new Set(prev.map(t => t.id));
-              const newItems = data.filter(t => !existingIds.has(t.id));
-              return [...prev, ...newItems];
-            });
-            showToast(`📂 ${data.length}건 불러오기 완료`);
-          } catch(err) {
-            showToast('불러오기 실패: ' + err.message, 'error');
-          }
-          e.target.value = ''; // 같은 파일 재선택 가능하도록 초기화
-        };
-        reader.readAsText(file);
-      }
-
-      function copyURL() {
-        const url = window.location.href;
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(url).then(()=>showToast('🔗 URL 복사 완료! 카카오톡에 붙여넣으세요')).catch(fallback);
-        } else { fallback(); }
-        function fallback() {
-          const el = document.createElement('textarea');
-          el.value = url; el.style.position='fixed'; el.style.opacity='0';
-          document.body.appendChild(el); el.select(); document.execCommand('copy');
-          document.body.removeChild(el);
-          showToast('🔗 URL 복사 완료! 카카오톡에 붙여넣으세요');
-        }
-      }
-
-      // Filtered + sorted tasks
+      // ── 목록 계산 ──
       const visible = useMemo(()=>{
-        let r = [...tasks];
-        if (filters.category) r = r.filter(t=>t.category===filters.category);
-        if (filters.status)   r = r.filter(t=>t.status===filters.status);
-        if (filters.priority) r = r.filter(t=>t.priority===filters.priority);
-        if (filters.search) {
-          const q = filters.search.toLowerCase();
-          r = r.filter(t=>t.title.toLowerCase().includes(q)||(t.detail||'').toLowerCase().includes(q));
-        }
-        r.sort((a,b)=>{
-          const mul = sort.dir==='asc'?1:-1;
-          if (sort.field==='priority') return mul*(PRI_ORD[a.priority]-PRI_ORD[b.priority]);
-          return mul*(a[sort.field]||'').localeCompare(b[sort.field]||'');
-        });
-        return r;
-      }, [tasks, filters, sort]);
+        const act = tab === 'active';
+        const order = { '진행':0, '대기':1, '보류':2, '완료':0, '중단':1 };
+        const prio = { '높음':0, '보통':1, '낮음':2 };
+        return tasks
+          .filter(t => act ? ACTIVE_STATUSES.includes(t.status) : !ACTIVE_STATUSES.includes(t.status))
+          .filter(t => !catFilter || t.category === catFilter)
+          .sort((a,b) =>
+            (order[a.status]-order[b.status]) ||
+            (act ? (prio[a.priority]-prio[b.priority]) : (b.completedAt||b.updatedAt||0)-(a.completedAt||a.updatedAt||0)) ||
+            (a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
+      }, [tasks, tab, catFilter]);
+
+      const activeCnt  = tasks.filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
+      const archiveCnt = tasks.length - activeCnt;
 
       return (
-        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors duration-200">
-
-          {/* ── Header ── */}
-          <header className="sticky top-0 z-30 bg-white/90 dark:bg-slate-800/90 backdrop-blur border-b border-slate-200 dark:border-slate-700">
-            <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
-              {/* Title */}
-              <div className="flex items-center gap-2 min-w-0">
-                <img src="icon.svg" alt="" className="w-7 h-7 shrink-0"/>
-                <div className="min-w-0">
-                  <h1 className="font-extrabold text-slate-800 dark:text-white leading-tight text-sm sm:text-base truncate">업무현황 관리</h1>
-                  <p className="text-xs text-slate-400 dark:text-slate-500">{tasks.length}건</p>
-                </div>
+        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors">
+          {/* 헤더 */}
+          <header className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+              <h1 className="font-bold text-slate-800 dark:text-slate-100">📋 과제 관리자</h1>
+              <div className="ml-auto flex items-center gap-1">
+                <button onClick={()=>setDark(!dark)} className="p-2 text-slate-400" title="다크 모드">{dark ? '☀️' : '🌙'}</button>
+                <button onClick={()=>{
+                    const blob = new Blob([JSON.stringify(tasks, null, 2)], { type:'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `과제백업_${today()}.json`; a.click();
+                  }} className="p-2 text-slate-400 text-sm" title="JSON 백업">⬇</button>
+                <button onClick={()=>firebase.auth().signOut()} className="p-2 text-slate-400 text-sm" title="로그아웃">↩</button>
               </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-
-                {/* URL 복사 */}
-                <button onClick={copyURL} title="URL 복사 (카카오톡 공유)"
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
-                  🔗 <span className="hidden sm:inline">URL 복사</span>
+            </div>
+            {/* 탭 + 분류 필터 */}
+            <div className="max-w-2xl mx-auto px-4 pb-2 space-y-2">
+              <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1 w-fit">
+                <button onClick={()=>setTab('active')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium ${tab==='active' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}>
+                  진행 중 {activeCnt}
                 </button>
-
-                {/* 불러오기 */}
-                <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport}/>
-                <button onClick={()=>importRef.current.click()} title="JSON 백업 파일 불러오기"
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
-                  📂 <span className="hidden sm:inline">불러오기</span>
+                <button onClick={()=>setTab('archive')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium ${tab==='archive' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}>
+                  완료·이력 {archiveCnt}
                 </button>
-
-                {/* 내보내기 */}
-                <button onClick={()=>exportJSON(tasks)} title="JSON 백업 파일 내보내기"
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors">
-                  💾 <span className="hidden sm:inline">내보내기</span>
-                </button>
-
-                {/* Dark mode */}
-                <button onClick={()=>setDark(d=>!d)}
-                  className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl transition-colors text-base">
-                  {dark?'☀️':'🌙'}
-                </button>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                <button onClick={()=>setCatFilter('')}
+                  className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${!catFilter ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent' : 'border-slate-200 dark:border-slate-600 text-slate-500'}`}>전체</button>
+                {CATEGORIES.map(c => (
+                  <button key={c} onClick={()=>setCatFilter(catFilter===c?'':c)}
+                    className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${catFilter===c ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent' : 'border-slate-200 dark:border-slate-600 text-slate-500'}`}>{c}</button>
+                ))}
               </div>
             </div>
           </header>
 
-          {/* ── Main ── */}
-          <main className="max-w-7xl mx-auto px-3 sm:px-4 py-6">
-            <Dashboard tasks={tasks}/>
-            <FilterBar filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} onAdd={()=>setShowForm(true)}/>
-            <TaskTable tasks={visible} onSelect={setSelected}/>
+          {/* 목록 */}
+          <main className="max-w-2xl mx-auto px-4 py-4 space-y-2.5 pb-24">
+            {!loaded && <p className="text-center text-sm text-slate-400 py-10">불러오는 중…</p>}
+            {loaded && visible.length === 0 && (
+              <div className="text-center py-16 space-y-2">
+                <div className="text-4xl">{tab==='active' ? '🌱' : '📦'}</div>
+                <p className="text-sm text-slate-400">
+                  {tab==='active' ? '진행 중인 과제가 없습니다. 새 과제를 추가해 보세요.' : '완료된 과제가 여기에 쌓입니다.'}
+                </p>
+              </div>
+            )}
+            {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} />)}
           </main>
 
-          {/* ── Modals / Panels ── */}
-          {showForm && <TaskForm onSave={addTask} onClose={()=>setShowForm(false)}/>}
+          {/* 새 과제 버튼 */}
+          <button onClick={()=>setShowForm(true)}
+            className="fixed bottom-6 right-6 z-20 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-2xl shadow-lg flex items-center justify-center">＋</button>
+
+          {showForm && <TaskForm onSave={saveTask} onClose={()=>setShowForm(false)} />}
           {selected && (
-            <TaskDetailPanel task={selected} onClose={()=>setSelected(null)}
-              onUpdate={updateTask} onDelete={deleteTask}/>
+            <TaskDetail task={selected} schedules={schedules}
+              onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
+              onSendSchedule={sendSchedule} />
           )}
-          <Toast toast={toast}/>
+          <Toast toast={toast} />
         </div>
       );
+    }
+
+    // ═══ 루트: 인증 게이트 ═══
+    function App() {
+      const [user, setUser] = useState(undefined);
+      useEffect(()=> firebase.auth().onAuthStateChanged(u => setUser(u)), []);
+      useEffect(()=>{
+        const dark = localStorage.getItem('wm-dark')==='true' ||
+          (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+      }, []);
+      if (user === undefined) return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900">
+          <p className="text-sm text-slate-400">확인 중…</p>
+        </div>
+      );
+      if (!user) return <Login />;
+      return <Main user={user} />;
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
   </script>
 
-  <!-- Service Worker registration (runs after page load) -->
+  <!-- Service Worker registration -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('./sw.js', { scope: './' })
-          .then(function(reg) {
-            console.log('[SW] Registered, scope:', reg.scope);
-            // Check for updates
-            reg.addEventListener('updatefound', function() {
-              const newSW = reg.installing;
-              newSW.addEventListener('statechange', function() {
-                if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('[SW] New version available. Reload to update.');
-                }
-              });
-            });
-          })
-          .catch(function(err) {
-            console.warn('[SW] Registration failed:', err);
-          });
+        navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function(){});
       });
     }
   </script>
