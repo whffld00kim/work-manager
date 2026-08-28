@@ -1,5 +1,5 @@
 /* ── 업무현황 관리 Service Worker ── */
-const CACHE = 'wm-cache-v3';
+const CACHE = 'wm-cache-v4'; /* v4: 뒤로 스와이프 = 창 닫기 (앱 종료 방지) */
 const SHELL = ['./index.html', './manifest.json', './icon.svg', './icon-maskable.svg'];
 
 // Install: cache app shell
