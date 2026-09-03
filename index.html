@@ -8,10 +8,10 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="과제 관리자" />
+  <meta name="apple-mobile-web-app-title" content="목표 관리" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <title>과제 관리자</title>
+  <title>목표 관리자</title>
 
   <!-- React -->
   <!-- 버전을 정확히 고정한다 (2026-09-03). @18처럼 두면 CDN이 다른 18.x를 줄 때 동작이 바뀔 수 있다. sw.js 캐시 목록과 맞출 것 -->
@@ -143,7 +143,7 @@
           <form onSubmit={submit} className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow p-6 space-y-4">
             <div className="text-center space-y-1">
               <div className="text-3xl">📋</div>
-              <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">과제 관리자</h1>
+              <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">목표 관리자</h1>
               <p className="text-xs text-slate-400">민성 스케줄과 같은 계정으로 로그인하세요 (일정 연동)</p>
             </div>
             <input type="email" required placeholder="이메일" value={email} onChange={e=>setEmail(e.target.value)}
@@ -511,7 +511,7 @@
         }
         const rec = {
           title: task.title, start, end, allDay, repeat: 'none',
-          done: false, location: '', memo: `[과제:${task.id}] 과제 관리자에서 보냄`,
+          done: false, location: '', memo: `[과제:${task.id}] 목표 관리자에서 보냄`,
           createdAt: Date.now(),
         };
         const ref = firebase.database().ref(`personal-schedules/${uid}`).push();
@@ -558,7 +558,7 @@
           {/* 헤더 */}
           <header className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
             <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-              <h1 className="font-bold text-slate-800 dark:text-slate-100">📋 과제 관리자</h1>
+              <h1 className="font-bold text-slate-800 dark:text-slate-100">📋 목표 관리자</h1>
               <div className="ml-auto flex items-center gap-1">
                 <button onClick={()=>setDark(!dark)} className="p-2 text-slate-400" title="다크 모드">{dark ? '☀️' : '🌙'}</button>
                 <button onClick={()=>{

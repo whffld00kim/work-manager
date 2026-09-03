@@ -1,7 +1,7 @@
 {
-  "name": "과제 관리자",
-  "short_name": "과제관리",
-  "description": "중장기 과제를 이력과 함께 관리하고, 실행할 날은 민성 스케줄로 보내는 앱",
+  "name": "목표 관리",
+  "short_name": "목표 관리",
+  "description": "중장기 목표를 이력과 함께 관리하고, 실행할 날은 민성 스케줄로 보내는 앱",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
