@@ -1,5 +1,5 @@
 /* ── 업무현황 관리 Service Worker ── */
-const CACHE = 'wm-cache-v5'; /* v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
+const CACHE = 'wm-cache-v6'; /* v6: React CDN 버전 18.3.1 고정 (2026-09-03). v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
 const SHELL = ['./index.html', './manifest.json', './icon.svg', './icon-maskable.svg'];
 
 // Install: cache app shell
