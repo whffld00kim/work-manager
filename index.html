@@ -219,7 +219,7 @@
       useEffect(()=>{ setF(task); }, [task]);
 
       const linked = useMemo(() =>
-        schedules.filter(s => (s.memo || '').includes(`[과제:${task.id}]`)).sort((a,b)=>b.start-a.start),
+        schedules.filter(s => (s.memo || '').includes(`[목표:${task.id}]`)).sort((a,b)=>b.start-a.start),
         [schedules, task.id]);
 
       const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
@@ -511,7 +511,7 @@
         }
         const rec = {
           title: task.title, start, end, allDay, repeat: 'none',
-          done: false, location: '', memo: `[과제:${task.id}] 목표 관리자에서 보냄`,
+          done: false, location: '', memo: `[목표:${task.id}] 목표 관리자에서 보냄`,
           createdAt: Date.now(),
         };
         const ref = firebase.database().ref(`personal-schedules/${uid}`).push();

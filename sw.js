@@ -1,5 +1,5 @@
 /* ── 업무현황 관리 Service Worker ── */
-const CACHE = 'wm-cache-v7'; /* v7: 이름을 「목표 관리자」/앱 이름 「목표 관리」로 (2026-09-03). v6: React CDN 18.3.1 고정. v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
+const CACHE = 'wm-cache-v8'; /* v8: 일정 메모 태그 [과제:id] → [목표:id] (2026-09-03, 기존 일정 1건도 DB에서 바꿈). v7: 이름을 「목표 관리자」/앱 이름 「목표 관리」로. v6: React CDN 18.3.1 고정. v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
 const SHELL = ['./index.html', './manifest.json', './icon.svg', './icon-maskable.svg'];
 
 // Install: cache app shell
