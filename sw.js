@@ -1,5 +1,5 @@
 /* ── 업무현황 관리 Service Worker ── */
-const CACHE = 'wm-cache-v9'; /* v9: HTML fetch에 cache:'no-cache' — 배포 후 10분간 옛 화면이 뜨던 문제 (2026-09-03). v8: 일정 메모 태그 [과제:id] → [목표:id] (2026-09-03, 기존 일정 1건도 DB에서 바꿈). v7: 이름을 「목표 관리자」/앱 이름 「목표 관리」로. v6: React CDN 18.3.1 고정. v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
+const CACHE = 'wm-cache-v10'; /* v10: 목표별 이미지 첨부 — Firebase Storage 버킷 minsung-buboo2-goal-images에 원본+썸네일, 크게 보기·원본 다운로드·삭제 (2026-09-19). v9: HTML fetch에 cache:'no-cache' — 배포 후 10분간 옛 화면이 뜨던 문제 (2026-09-03). v8: 일정 메모 태그 [과제:id] → [목표:id] (2026-09-03, 기존 일정 1건도 DB에서 바꿈). v7: 이름을 「목표 관리자」/앱 이름 「목표 관리」로. v6: React CDN 18.3.1 고정. v5: 과제 관리자로 전면 개편 — RTDB(long-tasks) + 민성 스케줄 연동 */
 const SHELL = ['./index.html', './manifest.json', './icon.svg', './icon-maskable.svg'];
 
 // Install: cache app shell
