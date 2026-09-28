@@ -29,6 +29,8 @@
   <script>tailwind.config = { darkMode: 'class' };</script>
 
   <style>
+/* 맨 위에서 아래로 당기면 크롬이 페이지를 새로고침하던 것을 막는다 (2026-09-28 사용자 요청 — 새로고침되며 로그인 화면이 다시 떴다) */
+html, body { overscroll-behavior-y: none; }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 9999px; }
