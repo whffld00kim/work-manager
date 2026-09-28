@@ -36,6 +36,169 @@
     * { box-sizing: border-box; }
     body { padding-bottom: env(safe-area-inset-bottom); }
     header { padding-top: env(safe-area-inset-top); }
+
+    /* ============ 태블릿 (2026-09-28) ============
+       갤럭시 탭을 가로로 두고 쓸 때. 폰 화면은 건드리지 않고 넓을 때만 덮어쓴다.
+       - 헤더는 한 줄 (제목 · 탭 · 분류 · 도구)
+       - 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기). 상세가 옆에서 덮는 창 대신 오른쪽 칸에 열린다
+       - 화면 높이를 채우고 두 칸이 각자 스크롤
+       Tailwind CDN 스타일이 이 태그보다 뒤에 붙으므로 #root를 앞에 붙여 이긴다.
+       JS 쪽 판정은 useTablet() — 조건을 바꾸면 둘 다 바꿀 것 */
+    @media (min-width: 900px) and (orientation: landscape) {
+      html { font-size: 17px; }
+      #root .wm-app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* ── 헤더 한 줄 ── */
+      #root .wm-header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding-left: max(24px, calc((100% - 1320px) / 2 + 24px));
+        padding-right: max(16px, calc((100% - 1320px) / 2 + 16px));
+      }
+      #root .wm-head-top { display: contents; }
+      #root .wm-head-title { flex: 0 0 auto; font-size: 1.15rem; padding: 14px 0; }
+      #root .wm-head-filters {
+        order: 1;
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      #root .wm-head-filters > * { margin-top: 0; }
+      #root .wm-head-filters button { padding-top: 7px; padding-bottom: 7px; }
+      #root .wm-chips { flex: 1 1 auto; min-width: 0; padding-bottom: 0; }
+      #root .wm-chips button { padding-left: 13px; padding-right: 13px; font-size: .8rem; }
+      #root .wm-head-tools { order: 2; flex: 0 0 auto; margin-left: 0; }
+      #root .wm-head-tools button { padding: 10px; font-size: 1.05rem; }
+
+      /* ── 목록 | 상세 ── */
+      #root .wm-split {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 0 24px;
+        display: grid;
+        grid-template-columns: 420px minmax(0, 1fr);
+        gap: 20px;
+      }
+      #root .wm-list {
+        max-width: none;
+        margin: 0;
+        padding: 18px 4px 96px;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+      }
+      /* 목록이 짧으면 카드가 조금씩 커져서 칸을 채운다 (길면 그대로 스크롤) */
+      #root .wm-card {
+        flex: 1 0 auto;
+        max-height: 132px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 16px 18px;
+      }
+      #root .wm-card-active { box-shadow: 0 0 0 2px #3b82f6, 0 4px 14px rgba(37,99,235,.18); }
+      #root .wm-fab {
+        right: auto;
+        left: calc(max(0px, (100vw - 1320px) / 2) + 24px + 420px - 56px - 14px);
+        bottom: 22px;
+      }
+
+      #root .wm-pane {
+        min-height: 0;
+        padding: 18px 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── 상세: 오른쪽 칸 안에서 두 단 ── */
+      #root .wm-detail-inline {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      }
+      #root .wm-detail-scroll {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+      }
+      #root .wm-detail-scroll > .sticky { padding: 12px 18px; }
+      #root .wm-d-body {
+        flex: 1 1 auto;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: auto 1fr;
+        gap: 16px;
+        padding: 18px;
+      }
+      #root .wm-d-body > * { margin-top: 0; }
+      #root .wm-d-info { grid-column: 1 / -1; }
+      /* 왼쪽 단: 이미지·체크리스트·(맨 아래로 밀린) 삭제 / 오른쪽 단: 일정 연동·진행 로그(남는 높이를 채운다) */
+      #root .wm-d-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+      #root .wm-d-spacer { flex: 1 1 auto; }
+      #root .wm-d-log { flex: 1 1 auto; }
+      #root .wm-d-created { padding-bottom: 0; margin-top: -8px; }
+      #root .wm-d-info, #root .wm-d-col > div:not(.wm-d-spacer) { padding: 18px; }
+      #root .wm-d-thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      #root .wm-d-info button { padding: 8px 16px; }
+
+      /* ── 한눈에 보기 ── */
+      #root .wm-overview {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
+        gap: 16px;
+      }
+      #root .wm-ov-tiles {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 12px;
+      }
+      #root .wm-ov-col { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+      #root .wm-ov-cats { grid-column: 1 / -1; }
+      #root .wm-ov-catlist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 32px; }
+      #root .wm-ov-hint { grid-column: 1 / -1; text-align: center; }
+      #root .wm-ov-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        text-align: left;
+        padding: 11px 8px;
+        border-radius: 8px;
+        border-bottom: 1px solid rgba(148,163,184,.18);
+      }
+      #root .wm-ov-row:last-child { border-bottom: none; }
+      #root .wm-ov-row:hover { background: rgba(148,163,184,.12); }
+
+      /* ── 새 과제: 가운데 창 ── */
+      #root .wm-form { max-width: 560px; padding: 26px; }
+    }
   </style>
 </head>
 <body>
@@ -152,6 +315,19 @@
       return Array.isArray(s.doneDates) && s.doneDates.includes(schedDate(s));
     }
 
+    // ═══ 태블릿 가로 판정 (2026-09-28) — CSS의 @media와 같은 조건. 이때만 목록|상세 두 칸으로 그린다 ═══
+    const TABLET_MQ = '(min-width: 900px) and (orientation: landscape)';
+    function useTablet() {
+      const [on, setOn] = useState(() => window.matchMedia(TABLET_MQ).matches);
+      useEffect(() => {
+        const mq = window.matchMedia(TABLET_MQ);
+        const f = () => setOn(mq.matches);
+        mq.addEventListener ? mq.addEventListener('change', f) : mq.addListener(f);
+        return () => { mq.removeEventListener ? mq.removeEventListener('change', f) : mq.removeListener(f); };
+      }, []);
+      return on;
+    }
+
     // ═══ Toast ═══
     function Toast({ toast }) {
       if (!toast) return null;
@@ -216,7 +392,7 @@
       return (
         <div className="fixed inset-0 z-40 bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
           <form onSubmit={submit} onClick={e=>e.stopPropagation()}
-            className="w-full sm:max-w-md bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+            className="wm-form w-full sm:max-w-md bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
             <h2 className="font-bold text-slate-800 dark:text-slate-100">새 과제</h2>
             <input autoFocus required placeholder="과제 제목" value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
             <div className="grid grid-cols-2 gap-2">
@@ -244,7 +420,7 @@
     }
 
     // ═══ 과제 상세 패널 ═══
-    function TaskDetail({ task, uid, schedules, onUpdate, onDelete, onClose, onSendSchedule, onToast }) {
+    function TaskDetail({ task, uid, schedules, onUpdate, onDelete, onClose, onSendSchedule, onToast, inline }) {
       const [editing, setEditing] = useState(false);
       const [f, setF] = useState(task);
       const [newLog, setNewLog] = useState('');
@@ -366,26 +542,10 @@
       const log = [...(task.log||[])].sort((a,b)=> b.date.localeCompare(a.date) || (b.id>a.id?1:-1));
       const doneCount = checklist.filter(c=>c.done).length;
 
-      return (
-        <div className="fixed inset-0 z-30 bg-black/40 flex justify-end" onClick={onClose}>
-          <div onClick={e=>e.stopPropagation()}
-            className="w-full sm:max-w-lg h-full bg-slate-50 dark:bg-slate-900 overflow-y-auto shadow-2xl">
-            {/* 헤더 */}
-            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
-              <button onClick={onClose} className="text-slate-400 text-xl px-1">←</button>
-              {editing ? (
-                <input value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
-              ) : (
-                <h2 className="flex-1 font-bold text-slate-800 dark:text-slate-100 truncate">{task.title}</h2>
-              )}
-              {editing
-                ? <button onClick={saveEdit} className="text-sm font-semibold text-blue-600 px-2">저장</button>
-                : <button onClick={()=>setEditing(true)} className="text-sm text-slate-400 px-2">편집</button>}
-            </div>
-
-            <div className="p-4 space-y-5">
+      // 카드 조각 — 폰은 한 줄로 쌓고, 태블릿(inline)은 두 단으로 나눠 담는다 (2026-09-28)
+      const infoCard = (<>
               {/* 기본 정보 */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+              <div className="wm-d-info bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
                 {editing ? (
                   <div className="grid grid-cols-2 gap-2">
                     <select value={f.category} onChange={e=>setF({...f, category:e.target.value})} className={inputCls}>
@@ -420,9 +580,10 @@
                 </div>
                 {task.completedAt && <p className="text-xs text-emerald-600 dark:text-emerald-400">✓ {new Date(task.completedAt).toLocaleDateString('ko-KR')} 완료</p>}
               </div>
-
+      </>);
+      const imgCard = (<>
               {/* 이미지 — 목표를 떠올리게 하는 사진. 원본은 Storage, 여기엔 썸네일 */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+              <div className="wm-d-img bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">🖼️ 이미지 {images.length > 0 && <span className="font-normal text-xs text-slate-400">({images.length})</span>}</h3>
                   <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={e=>addImages(e.target.files)} />
@@ -439,7 +600,7 @@
                 {images.length === 0 && !uploading
                   ? <p className="text-xs text-slate-400">이 목표를 세우게 한 사진, 도달했을 때의 모습을 원본 그대로 보관합니다.</p>
                   : (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="wm-d-thumbs grid grid-cols-3 gap-2">
                       {images.map(img => (
                         <button key={img.id} onClick={()=>setViewer(img.id)}
                           className="relative aspect-square rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
@@ -449,9 +610,10 @@
                     </div>
                   )}
               </div>
-
+      </>);
+      const checkCard = (<>
               {/* 체크리스트 */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+              <div className="wm-d-check bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">체크리스트</h3>
                   {checklist.length > 0 && <span className="text-xs text-slate-400">{doneCount}/{checklist.length}</span>}
@@ -474,9 +636,10 @@
                   <button onClick={addCheck} className="px-3 rounded-lg bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300">＋</button>
                 </div>
               </div>
-
+      </>);
+      const schedCard = (<>
               {/* 일정으로 보내기 + 연동된 일정 */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+              <div className="wm-d-sched bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">📅 일정 연동 <span className="font-normal text-xs text-slate-400">(민성 스케줄)</span></h3>
                   <button onClick={()=>setSchedOpen(!schedOpen)} className="text-xs font-medium text-blue-600 dark:text-blue-400">일정으로 보내기</button>
@@ -499,9 +662,10 @@
                     </div>
                   ))}
               </div>
-
+      </>);
+      const logCard = (<>
               {/* 진행 로그 */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+              <div className="wm-d-log bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">진행 로그 <span className="font-normal text-xs text-slate-400">({log.length})</span></h3>
                 <div className="space-y-1.5">
                   <div className="flex gap-2">
@@ -529,13 +693,39 @@
                   {log.length === 0 && <p className="text-xs text-slate-400">진행 기록이 여기에 쌓입니다.</p>}
                 </div>
               </div>
-
+      </>);
+      const delBlock = (<>
               {/* 삭제 */}
               <button onClick={()=>{ if(confirm('이 과제를 이력까지 전부 삭제할까요?\n(완료 처리만 하려면 상태를 "완료"로 바꾸세요)')) onDelete(task.id); }}
-                className="w-full py-2.5 rounded-xl border border-red-200 dark:border-red-900 text-red-500 text-sm">과제 삭제</button>
-              <p className="text-center text-[10px] text-slate-300 dark:text-slate-600 pb-4">
+                className="wm-d-del w-full py-2.5 rounded-xl border border-red-200 dark:border-red-900 text-red-500 text-sm">과제 삭제</button>
+              <p className="wm-d-created text-center text-[10px] text-slate-300 dark:text-slate-600 pb-4">
                 생성 {new Date(task.createdAt).toLocaleDateString('ko-KR')}
               </p>
+      </>);
+
+      return (
+        <div className={inline ? 'wm-detail-inline' : 'fixed inset-0 z-30 bg-black/40 flex justify-end'} onClick={inline ? undefined : onClose}>
+          <div onClick={e=>e.stopPropagation()}
+            className={inline ? 'wm-detail-scroll bg-slate-50 dark:bg-slate-900' : 'w-full sm:max-w-lg h-full bg-slate-50 dark:bg-slate-900 overflow-y-auto shadow-2xl'}>
+            {/* 헤더 */}
+            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
+              <button onClick={onClose} className="text-slate-400 text-xl px-1">←</button>
+              {editing ? (
+                <input value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
+              ) : (
+                <h2 className="flex-1 font-bold text-slate-800 dark:text-slate-100 truncate">{task.title}</h2>
+              )}
+              {editing
+                ? <button onClick={saveEdit} className="text-sm font-semibold text-blue-600 px-2">저장</button>
+                : <button onClick={()=>setEditing(true)} className="text-sm text-slate-400 px-2">편집</button>}
+            </div>
+
+            <div className="wm-d-body p-4 space-y-5">
+              {inline ? (<>
+                {infoCard}
+                <div className="wm-d-col">{imgCard}{checkCard}<div className="wm-d-spacer"></div>{delBlock}</div>
+                <div className="wm-d-col">{schedCard}{logCard}</div>
+              </>) : (<>{infoCard}{imgCard}{checkCard}{schedCard}{logCard}{delBlock}</>)}
             </div>
           </div>
 
@@ -575,7 +765,7 @@
     }
 
     // ═══ 과제 카드 ═══
-    function TaskCard({ task, onSelect }) {
+    function TaskCard({ task, onSelect, active }) {
       const checklist = task.checklist || [];
       const doneCount = checklist.filter(c=>c.done).length;
       const pct = checklist.length ? Math.round(doneCount / checklist.length * 100) : null;
@@ -584,7 +774,7 @@
       const cover = (task.images || [])[0];
       return (
         <button onClick={()=>onSelect(task)}
-          className="w-full text-left bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition space-y-2">
+          className={`wm-card${active ? ' wm-card-active' : ''} w-full text-left bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition space-y-2`}>
           <div className="flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[task.status]}`}></span>
             <span className="flex-1 font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{task.title}</span>
@@ -609,6 +799,74 @@
       );
     }
 
+    // ═══ 태블릿 오른쪽 칸 — 목표를 고르기 전에 보이는 한눈에 보기 (2026-09-28) ═══
+    function Overview({ tasks, onSelect }) {
+      const cnt = st => tasks.filter(t => t.status === st).length;
+      const active = tasks.filter(t => ACTIVE_STATUSES.includes(t.status));
+      const due = active.filter(t => t.dueDate).sort((a,b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 6);
+      const recent = tasks.flatMap(t => (t.log||[]).map(l => ({ ...l, task: t })))
+        .sort((a,b) => b.date.localeCompare(a.date) || (b.id > a.id ? 1 : -1)).slice(0, 6);
+      const byCat = CATEGORIES.map(c => [c, active.filter(t => t.category === c).length]).filter(x => x[1] > 0);
+      const maxCat = Math.max(1, ...byCat.map(x => x[1]));
+      const card = 'bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm';
+      const h3 = 'text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3';
+      return (
+        <div className="wm-overview">
+          <div className="wm-ov-tiles">
+            {STATUSES.map(st => (
+              <div key={st} className={`${card} !p-4`}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[st]}`}></span>{st}
+                </div>
+                <div className="text-3xl font-bold text-slate-800 dark:text-slate-100 mt-1">{cnt(st)}</div>
+              </div>
+            ))}
+          </div>
+          <div className={`${card} wm-ov-col`}>
+            <h3 className={h3}>⏰ 다가오는 기한</h3>
+            {due.length === 0 && <p className="text-xs text-slate-400">기한을 정한 진행 중 목표가 없습니다.</p>}
+            {due.map(t => { const dd = dday(t.dueDate, t.status); return (
+              <button key={t.id} onClick={()=>onSelect(t)} className="wm-ov-row">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[t.status]}`}></span>
+                <span className="flex-1 truncate text-sm text-slate-700 dark:text-slate-200">{t.title}</span>
+                <span className="text-xs text-slate-400">{fmtDate(t.dueDate)}</span>
+                {dd && <span className={`text-xs w-14 text-right ${dd.cls}`}>{dd.text}</span>}
+              </button>
+            ); })}
+          </div>
+          <div className={`${card} wm-ov-col`}>
+            <h3 className={h3}>📝 최근 진행 기록</h3>
+            {recent.length === 0 && <p className="text-xs text-slate-400">진행 기록이 아직 없습니다.</p>}
+            {recent.map(l => (
+              <button key={l.task.id + l.id} onClick={()=>onSelect(l.task)} className="wm-ov-row !items-start">
+                <span className="text-xs font-medium text-slate-400 shrink-0 w-20 pt-0.5">{fmtDate(l.date)}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-xs text-blue-600 dark:text-blue-400 truncate">{l.task.title}</span>
+                  <span className="block text-sm text-slate-700 dark:text-slate-200 truncate">{l.text}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className={`${card} wm-ov-cats`}>
+            <h3 className={h3}>분류별 진행 중 목표</h3>
+            {byCat.length === 0 && <p className="text-xs text-slate-400">진행 중인 목표가 없습니다.</p>}
+            <div className="wm-ov-catlist">
+              {byCat.map(([c, n]) => (
+                <div key={c} className="flex items-center gap-3">
+                  <span className={`px-2 py-0.5 rounded-md text-xs font-medium w-20 text-center ${CAT_COLORS[c]}`}>{c}</span>
+                  <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: (n / maxCat * 100) + '%' }}></div>
+                  </div>
+                  <span className="text-xs text-slate-500 w-6 text-right">{n}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="wm-ov-hint text-xs text-slate-400">왼쪽 목록에서 목표를 누르면 여기에 상세가 열립니다.</p>
+        </div>
+      );
+    }
+
     // ═══ 메인 앱 ═══
     function Main({ user }) {
       const [tasks, setTasks] = useState([]);
@@ -622,6 +880,7 @@
       const [dark, setDark] = useState(()=> localStorage.getItem('wm-dark')==='true' ||
         (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches));
 
+      const tablet = useTablet();
       const uid = user.uid;
       const tasksRef = () => firebase.database().ref(`long-tasks/${uid}/tasks`);
 
@@ -724,12 +983,12 @@
       const archiveCnt = tasks.length - activeCnt;
 
       return (
-        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors">
+        <div className="wm-app min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors">
           {/* 헤더 */}
-          <header className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-              <h1 className="font-bold text-slate-800 dark:text-slate-100">📋 목표 관리자</h1>
-              <div className="ml-auto flex items-center gap-1">
+          <header className="wm-header sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+            <div className="wm-head-top max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+              <h1 className="wm-head-title font-bold text-slate-800 dark:text-slate-100">📋 목표 관리자</h1>
+              <div className="wm-head-tools ml-auto flex items-center gap-1">
                 <button onClick={()=>setDark(!dark)} className="p-2 text-slate-400" title="다크 모드">{dark ? '☀️' : '🌙'}</button>
                 <button onClick={()=>{
                     const blob = new Blob([JSON.stringify(tasks, null, 2)], { type:'application/json' });
@@ -741,7 +1000,7 @@
               </div>
             </div>
             {/* 탭 + 분류 필터 */}
-            <div className="max-w-2xl mx-auto px-4 pb-2 space-y-2">
+            <div className="wm-head-filters max-w-2xl mx-auto px-4 pb-2 space-y-2">
               <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1 w-fit">
                 <button onClick={()=>setTab('active')}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium ${tab==='active' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}>
@@ -752,7 +1011,7 @@
                   완료·이력 {archiveCnt}
                 </button>
               </div>
-              <div className="flex gap-1.5 overflow-x-auto pb-1">
+              <div className="wm-chips flex gap-1.5 overflow-x-auto pb-1">
                 <button onClick={()=>setCatFilter('')}
                   className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${!catFilter ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent' : 'border-slate-200 dark:border-slate-600 text-slate-500'}`}>전체</button>
                 {CATEGORIES.map(c => (
@@ -764,25 +1023,43 @@
           </header>
 
           {/* 목록 */}
-          <main className="max-w-2xl mx-auto px-4 py-4 space-y-2.5 pb-24">
-            {!loaded && <p className="text-center text-sm text-slate-400 py-10">불러오는 중…</p>}
-            {loaded && visible.length === 0 && (
-              <div className="text-center py-16 space-y-2">
-                <div className="text-4xl">{tab==='active' ? '🌱' : '📦'}</div>
-                <p className="text-sm text-slate-400">
-                  {tab==='active' ? '진행 중인 과제가 없습니다. 새 과제를 추가해 보세요.' : '완료된 과제가 여기에 쌓입니다.'}
-                </p>
+          {(() => {
+            const list = (
+              <main className="wm-list max-w-2xl mx-auto px-4 py-4 space-y-2.5 pb-24">
+                {!loaded && <p className="text-center text-sm text-slate-400 py-10">불러오는 중…</p>}
+                {loaded && visible.length === 0 && (
+                  <div className="text-center py-16 space-y-2">
+                    <div className="text-4xl">{tab==='active' ? '🌱' : '📦'}</div>
+                    <p className="text-sm text-slate-400">
+                      {tab==='active' ? '진행 중인 과제가 없습니다. 새 과제를 추가해 보세요.' : '완료된 과제가 여기에 쌓입니다.'}
+                    </p>
+                  </div>
+                )}
+                {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} active={tablet && selected && selected.id === t.id} />)}
+              </main>
+            );
+            if (!tablet) return list;
+            // 태블릿 가로: 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기)
+            return (
+              <div className="wm-split">
+                {list}
+                <section className="wm-pane">
+                  {selected
+                    ? <TaskDetail key={selected.id} inline task={selected} uid={uid} schedules={schedules}
+                        onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
+                        onSendSchedule={sendSchedule} onToast={showToast} />
+                    : <Overview tasks={tasks} onSelect={setSelected} />}
+                </section>
               </div>
-            )}
-            {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} />)}
-          </main>
+            );
+          })()}
 
           {/* 새 과제 버튼 */}
           <button onClick={()=>setShowForm(true)}
-            className="fixed bottom-6 right-6 z-20 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-2xl shadow-lg flex items-center justify-center">＋</button>
+            className="wm-fab fixed bottom-6 right-6 z-20 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-2xl shadow-lg flex items-center justify-center">＋</button>
 
           {showForm && <TaskForm onSave={saveTask} onClose={()=>setShowForm(false)} />}
-          {selected && (
+          {selected && !tablet && (
             <TaskDetail task={selected} uid={uid} schedules={schedules}
               onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
               onSendSchedule={sendSchedule} onToast={showToast} />
