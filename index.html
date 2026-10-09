@@ -45,7 +45,7 @@ html, body { overscroll-behavior-y: none; }
        - 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기). 상세가 옆에서 덮는 창 대신 오른쪽 칸에 열린다
        - 화면 높이를 채우고 두 칸이 각자 스크롤
        Tailwind CDN 스타일이 이 태그보다 뒤에 붙으므로 #root를 앞에 붙여 이긴다.
-       JS 쪽 판정은 useTablet() — 조건을 바꾸면 둘 다 바꿀 것 */
+       JS 쪽 판정은 useMQ(TABLET_MQ) — 조건을 바꾸면 둘 다 바꿀 것. 폴드 펼침 블록은 아래 따로 */
     @media (min-width: 900px) and (orientation: landscape) {
       html { font-size: 17px; }
       #root .wm-app {
@@ -201,6 +201,92 @@ html, body { overscroll-behavior-y: none; }
       /* ── 새 과제: 가운데 창 ── */
       #root .wm-form { max-width: 560px; padding: 26px; }
     }
+
+    /* ============ 폴드7 펼친 화면 · 태블릿 세로 (2026-10-09) ============
+       폭 600 이상인데 태블릿 가로는 아닌 화면 — 폴드7 펼침(약 750×830), 탭 S7+ 세로.
+       사용자: 상세가 옆에서 덮는 창이라 왼쪽이 어둡게 남고, 사진이 제목 위로 올라와 보기 안 좋다.
+       규칙(LifeOS apps-internals/references/screen-layout.md): 글자 크기는 폰 그대로, 자리만 — 태블릿처럼 목록|상세 두 칸,
+       상세 안은 폰처럼 한 줄로 쌓는다(칸이 420px쯤이라 두 단은 좁다). 헤더는 폰 그대로 두 줄.
+       JS 판정은 FOLD_MQ — 조건을 바꾸면 둘 다 바꿀 것 */
+    @media (min-width: 600px) and (max-width: 899px) and (min-height: 500px), (min-width: 600px) and (orientation: portrait) {
+      #root .wm-app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+      }
+      #root .wm-header { flex: 0 0 auto; }
+      #root .wm-head-top, #root .wm-head-filters { max-width: none; }
+
+      /* ── 목록 | 상세 ── */
+      #root .wm-split {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        padding: 0 16px;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 16px;
+      }
+      #root .wm-list {
+        max-width: none;
+        margin: 0;
+        padding: 14px 2px 96px;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      #root .wm-card-active { box-shadow: 0 0 0 2px #3b82f6, 0 4px 14px rgba(37,99,235,.18); }
+      #root .wm-fab {
+        right: auto;
+        left: calc(16px + 300px - 56px - 10px);
+        bottom: 20px;
+      }
+      #root .wm-pane {
+        min-height: 0;
+        padding: 14px 0;
+        display: flex;
+        flex-direction: column;
+      }
+      #root .wm-detail-inline {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      }
+      #root .wm-detail-scroll { flex: 1 1 auto; overflow-y: auto; }
+
+      /* ── 한눈에 보기: 한 줄로 쌓고 통째로 스크롤 ── */
+      #root .wm-overview {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      #root .wm-ov-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      #root .wm-ov-col { flex: 0 0 auto; }
+      #root .wm-ov-catlist { display: grid; gap: 10px; }
+      #root .wm-ov-hint { text-align: center; }
+      #root .wm-ov-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        text-align: left;
+        padding: 10px 6px;
+        border-radius: 8px;
+        border-bottom: 1px solid rgba(148,163,184,.18);
+      }
+      #root .wm-ov-row:last-child { border-bottom: none; }
+
+      /* ── 새 과제: 가운데 창 ── */
+      #root .wm-form { max-width: 560px; }
+    }
   </style>
 </head>
 <body>
@@ -317,16 +403,18 @@ html, body { overscroll-behavior-y: none; }
       return Array.isArray(s.doneDates) && s.doneDates.includes(schedDate(s));
     }
 
-    // ═══ 태블릿 가로 판정 (2026-09-28) — CSS의 @media와 같은 조건. 이때만 목록|상세 두 칸으로 그린다 ═══
+    // ═══ 화면 판정 — CSS의 @media와 같은 조건 (조건을 바꾸면 둘 다) ═══
+    // 태블릿 가로(2026-09-28): 목록|상세 두 칸 + 상세 안 두 단 · 폴드7 펼침/태블릿 세로(2026-10-09): 목록|상세 두 칸, 상세 안은 폰처럼 한 줄
     const TABLET_MQ = '(min-width: 900px) and (orientation: landscape)';
-    function useTablet() {
-      const [on, setOn] = useState(() => window.matchMedia(TABLET_MQ).matches);
+    const FOLD_MQ = '(min-width: 600px) and (max-width: 899px) and (min-height: 500px), (min-width: 600px) and (orientation: portrait)';
+    function useMQ(query) {
+      const [on, setOn] = useState(() => window.matchMedia(query).matches);
       useEffect(() => {
-        const mq = window.matchMedia(TABLET_MQ);
+        const mq = window.matchMedia(query);
         const f = () => setOn(mq.matches);
         mq.addEventListener ? mq.addEventListener('change', f) : mq.addListener(f);
         return () => { mq.removeEventListener ? mq.removeEventListener('change', f) : mq.removeListener(f); };
-      }, []);
+      }, [query]);
       return on;
     }
 
@@ -422,7 +510,8 @@ html, body { overscroll-behavior-y: none; }
     }
 
     // ═══ 과제 상세 패널 ═══
-    function TaskDetail({ task, uid, schedules, onUpdate, onDelete, onClose, onSendSchedule, onToast, inline }) {
+    // inline: 오른쪽 칸 안에 열림(덮는 창 ✗) · twoCol: 상세 안을 두 단으로(태블릿 가로만, 폴드는 한 줄)
+    function TaskDetail({ task, uid, schedules, onUpdate, onDelete, onClose, onSendSchedule, onToast, inline, twoCol }) {
       const [editing, setEditing] = useState(false);
       const [f, setF] = useState(task);
       const [newLog, setNewLog] = useState('');
@@ -709,8 +798,8 @@ html, body { overscroll-behavior-y: none; }
         <div className={inline ? 'wm-detail-inline' : 'fixed inset-0 z-30 bg-black/40 flex justify-end'} onClick={inline ? undefined : onClose}>
           <div onClick={e=>e.stopPropagation()}
             className={inline ? 'wm-detail-scroll bg-slate-50 dark:bg-slate-900' : 'w-full sm:max-w-lg h-full bg-slate-50 dark:bg-slate-900 overflow-y-auto shadow-2xl'}>
-            {/* 헤더 */}
-            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
+            {/* 헤더 — z-10: 아래 이미지 썸네일(relative)이 스크롤하며 제목 위로 올라오던 것 (2026-10-09 폴드 캡처) */}
+            <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
               <button onClick={onClose} className="text-slate-400 text-xl px-1">←</button>
               {editing ? (
                 <input value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
@@ -723,7 +812,7 @@ html, body { overscroll-behavior-y: none; }
             </div>
 
             <div className="wm-d-body p-4 space-y-5">
-              {inline ? (<>
+              {inline && twoCol ? (<>
                 {infoCard}
                 <div className="wm-d-col">{imgCard}{checkCard}<div className="wm-d-spacer"></div>{delBlock}</div>
                 <div className="wm-d-col">{schedCard}{logCard}</div>
@@ -882,7 +971,9 @@ html, body { overscroll-behavior-y: none; }
       const [dark, setDark] = useState(()=> localStorage.getItem('wm-dark')==='true' ||
         (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches));
 
-      const tablet = useTablet();
+      const tablet = useMQ(TABLET_MQ);          // 태블릿 가로: 두 칸 + 상세 두 단
+      const fold   = useMQ(FOLD_MQ);            // 폴드7 펼침·태블릿 세로: 두 칸, 상세는 한 줄 (2026-10-09)
+      const split  = tablet || fold;            // 목록|상세 두 칸으로 그릴지
       const uid = user.uid;
       const tasksRef = () => firebase.database().ref(`long-tasks/${uid}/tasks`);
 
@@ -1037,17 +1128,17 @@ html, body { overscroll-behavior-y: none; }
                     </p>
                   </div>
                 )}
-                {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} active={tablet && selected && selected.id === t.id} />)}
+                {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} active={split && selected && selected.id === t.id} />)}
               </main>
             );
-            if (!tablet) return list;
-            // 태블릿 가로: 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기)
+            if (!split) return list;
+            // 태블릿 가로·폴드 펼침: 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기)
             return (
               <div className="wm-split">
                 {list}
                 <section className="wm-pane">
                   {selected
-                    ? <TaskDetail key={selected.id} inline task={selected} uid={uid} schedules={schedules}
+                    ? <TaskDetail key={selected.id} inline twoCol={tablet} task={selected} uid={uid} schedules={schedules}
                         onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
                         onSendSchedule={sendSchedule} onToast={showToast} />
                     : <Overview tasks={tasks} onSelect={setSelected} />}
@@ -1061,7 +1152,7 @@ html, body { overscroll-behavior-y: none; }
             className="wm-fab fixed bottom-6 right-6 z-20 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-2xl shadow-lg flex items-center justify-center">＋</button>
 
           {showForm && <TaskForm onSave={saveTask} onClose={()=>setShowForm(false)} />}
-          {selected && !tablet && (
+          {selected && !split && (
             <TaskDetail task={selected} uid={uid} schedules={schedules}
               onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
               onSendSchedule={sendSchedule} onToast={showToast} />
