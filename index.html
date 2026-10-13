@@ -523,7 +523,8 @@ html, body { overscroll-behavior-y: none; }
       const [uploading, setUploading] = useState(null);   // { done, total, pct }
       const [viewer, setViewer] = useState(null);         // 크게 보는 이미지 id
       const fileInput = useRef(null);
-      useEffect(()=>{ setF(task); }, [task]);
+      // 편집 중엔 입력하던 값을 지우지 않는다 — 상태 버튼을 누르거나 다른 기기가 고쳐 task 가 바뀌어도 (2026-10-13)
+      useEffect(()=>{ if (!editing) setF(task); }, [task]);
       // 고치기는 모두 patch 함수로 — cur 는 저장 시점의 최신 과제 (Main.saveTask 참고). 이 화면의 task 를 통째로 쓰지 않는다
       const patch = fn => onUpdate(task.id, fn);
 
@@ -606,7 +607,8 @@ html, body { overscroll-behavior-y: none; }
         setEditing(false);
       }
       function setStatus(st) {
-        patch(cur => ({ ...cur, status: st, completedAt: st==='완료' ? Date.now() : null }));
+        // 완료를 다시 눌러도 처음 완료한 시각을 지킨다
+        patch(cur => ({ ...cur, status: st, completedAt: st==='완료' ? (cur.completedAt || Date.now()) : null }));
       }
       function addLog() {
         if (!newLog.trim()) return;
@@ -1085,6 +1087,8 @@ html, body { overscroll-behavior-y: none; }
           start = new Date(`${dateStr}T00:00:00`).getTime();
           end = new Date(`${dateStr}T23:59:59`).getTime(); allDay = true;
         }
+        // 날짜 칸을 비우고 보내면 start 가 NaN 이 되어 set 이 예외를 던지고 아무 반응이 없었다
+        if (!dateStr || isNaN(start)) { showToast('날짜를 확인해 주세요', 'error'); return; }
         const rec = {
           title: task.title, start, end, allDay, repeat: 'none',
           done: false, location: '', memo: `[목표:${task.id}] 목표 관리자에서 보냄`,
