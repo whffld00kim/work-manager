@@ -523,7 +523,10 @@ html, body { overscroll-behavior-y: none; }
       const [uploading, setUploading] = useState(null);   // { done, total, pct }
       const [viewer, setViewer] = useState(null);         // 크게 보는 이미지 id
       const fileInput = useRef(null);
-      useEffect(()=>{ setF(task); }, [task]);
+      // 편집 중엔 입력하던 값을 지우지 않는다 — 상태 버튼을 누르거나 다른 기기가 고쳐 task 가 바뀌어도 (2026-10-13)
+      useEffect(()=>{ if (!editing) setF(task); }, [task]);
+      // 고치기는 모두 patch 함수로 — cur 는 저장 시점의 최신 과제 (Main.saveTask 참고). 이 화면의 task 를 통째로 쓰지 않는다
+      const patch = fn => onUpdate(task.id, fn);
 
       // ── 이미지 첨부 ──
       const images = task.images || [];
@@ -554,23 +557,29 @@ html, body { overscroll-behavior-y: none; }
                 rej, res);
             });
             const url = await ref.getDownloadURL();
-            let thumbUrl = null, width = null, height = null;
+            let thumbUrl = null, thumbPath = null, width = null, height = null;
             const th = await makeThumb(file);
             if (th) {
               width = th.width; height = th.height;
               if (th.blob) {
-                const tref = imgRef(`${base}_thumb.jpg`);
-                await tref.put(th.blob, { contentType: 'image/jpeg', cacheControl: 'private, max-age=31536000, immutable' });
-                thumbUrl = await tref.getDownloadURL();
+                // 썸네일은 덤이다 — 실패해도 원본은 이미 올라갔으니 기록은 남긴다 (목록·카드는 원본을 보여준다)
+                try {
+                  const tref = imgRef(`${base}_thumb.jpg`);
+                  await tref.put(th.blob, { contentType: 'image/jpeg', cacheControl: 'private, max-age=31536000, immutable' });
+                  thumbPath = tref.fullPath;
+                  thumbUrl = await tref.getDownloadURL();
+                } catch (e) { /* 썸네일 없이 진행 */ }
               }
             }
-            added.push({ id, name, path: ref.fullPath, url, thumbPath: thumbUrl ? `${base}_thumb.jpg` : null, thumbUrl,
+            added.push({ id, name, path: ref.fullPath, url, thumbPath, thumbUrl,
               size: file.size, type: file.type, width, height, createdAt: Date.now() });
           }
-          onUpdate({ ...task, images: [...images, ...added], updatedAt: Date.now() });
+          // 올리는 동안 이 화면의 task 는 옛것일 수 있다 (그사이 남긴 기록 등) — 최신 과제에 사진만 덧붙인다
+          const list = added.slice();
+          patch(cur => ({ ...cur, images: [...(cur.images||[]), ...list] }));
           onToast(`이미지 ${added.length}장을 저장했어요 🖼️`);
         } catch (e) {
-          if (added.length) onUpdate({ ...task, images: [...images, ...added], updatedAt: Date.now() });
+          if (added.length) { const list = added.slice(); patch(cur => ({ ...cur, images: [...(cur.images||[]), ...list] })); }
           onToast('이미지 업로드 실패: ' + (e && e.message || e), 'error');
         } finally {
           setUploading(null);
@@ -581,7 +590,7 @@ html, body { overscroll-behavior-y: none; }
         if (!confirm(`「${img.name}」을(를) 원본까지 지울까요?`)) return;
         imgRef(img.path).delete().catch(()=>{});
         if (img.thumbPath) imgRef(img.thumbPath).delete().catch(()=>{});
-        onUpdate({ ...task, images: images.filter(x => x.id !== img.id), updatedAt: Date.now() });
+        patch(cur => ({ ...cur, images: (cur.images||[]).filter(x => x.id !== img.id) }));
         setViewer(null);
       }
       const viewing = viewer ? images.find(x => x.id === viewer) : null;
@@ -593,36 +602,37 @@ html, body { overscroll-behavior-y: none; }
       const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
 
       function saveEdit() {
-        onUpdate({ ...task, title:f.title.trim()||task.title, category:f.category, priority:f.priority,
-          dueDate:f.dueDate||null, updatedAt:Date.now() });
+        const { title, category, priority, dueDate } = f;
+        patch(cur => ({ ...cur, title: title.trim()||cur.title, category, priority, dueDate: dueDate||null }));
         setEditing(false);
       }
       function setStatus(st) {
-        onUpdate({ ...task, status: st, completedAt: st==='완료' ? Date.now() : null, updatedAt: Date.now() });
+        // 완료를 다시 눌러도 처음 완료한 시각을 지킨다
+        patch(cur => ({ ...cur, status: st, completedAt: st==='완료' ? (cur.completedAt || Date.now()) : null }));
       }
       function addLog() {
         if (!newLog.trim()) return;
-        const log = [...(task.log||[]), { id:genId(), date:logDate, text:newLog.trim() }];
-        onUpdate({ ...task, log, updatedAt: Date.now() });
+        const entry = { id:genId(), date:logDate, text:newLog.trim() };
+        patch(cur => ({ ...cur, log: [...(cur.log||[]), entry] }));
         setNewLog('');
       }
       function delLog(id) {
         if (!confirm('이 기록을 지울까요?')) return;
-        onUpdate({ ...task, log:(task.log||[]).filter(l=>l.id!==id), updatedAt:Date.now() });
+        patch(cur => ({ ...cur, log: (cur.log||[]).filter(l=>l.id!==id) }));
       }
       function addCheck() {
         if (!newCheck.trim()) return;
-        const checklist = [...(task.checklist||[]), { id:genId(), text:newCheck.trim(), done:false, doneDate:null }];
-        onUpdate({ ...task, checklist, updatedAt: Date.now() });
+        const entry = { id:genId(), text:newCheck.trim(), done:false, doneDate:null };
+        patch(cur => ({ ...cur, checklist: [...(cur.checklist||[]), entry] }));
         setNewCheck('');
       }
       function toggleCheck(id) {
-        const checklist = (task.checklist||[]).map(c =>
-          c.id===id ? { ...c, done:!c.done, doneDate: !c.done ? today() : null } : c);
-        onUpdate({ ...task, checklist, updatedAt: Date.now() });
+        const now = (task.checklist||[]).find(c=>c.id===id);
+        const done = !(now && now.done), doneDate = done ? today() : null;   // 누른 시점의 뜻(켬/끔)을 저장한다
+        patch(cur => ({ ...cur, checklist: (cur.checklist||[]).map(c => c.id===id ? { ...c, done, doneDate } : c) }));
       }
       function delCheck(id) {
-        onUpdate({ ...task, checklist:(task.checklist||[]).filter(c=>c.id!==id), updatedAt:Date.now() });
+        patch(cur => ({ ...cur, checklist: (cur.checklist||[]).filter(c=>c.id!==id) }));
       }
       function sendSchedule() {
         onSendSchedule(task, schedDateV, schedTime);
@@ -970,6 +980,9 @@ html, body { overscroll-behavior-y: none; }
       const [toast, setToast] = useState(null);
       const [dark, setDark] = useState(()=> localStorage.getItem('wm-dark')==='true' ||
         (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches));
+      const [connected, setConnected] = useState(true);   // RTDB 연결 상태 (.info/connected)
+      const [pending, setPending] = useState(0);          // 서버 응답을 기다리는 쓰기 수
+      const [notice, setNotice] = useState('');           // 연결 끊김·저장 대기 안내 (아래 useEffect)
 
       const tablet = useMQ(TABLET_MQ);          // 태블릿 가로: 두 칸 + 상세 두 단
       const fold   = useMQ(FOLD_MQ);            // 폴드7 펼침·태블릿 세로: 두 칸, 상세는 한 줄 (2026-10-09)
@@ -977,15 +990,23 @@ html, body { overscroll-behavior-y: none; }
       const uid = user.uid;
       const tasksRef = () => firebase.database().ref(`long-tasks/${uid}/tasks`);
 
+      // ── 구독 (2026-10-13) ──
+      // 그전엔 once('value')로 한 번만 읽어서, 태블릿을 오래 켜 둔 채 폰에서 고치면 태블릿은 옛 화면인 줄 모르고
+      // 과제를 통째로 덮어썼다. on('value')면 다른 기기의 변경이 곧바로 내려오고, 이 기기의 쓰기도 SDK가
+      // 서버 응답 전에 먼저 반영해 준다(오프라인 포함). 저장이 거부되면 SDK가 서버 값으로 되돌려 주므로
+      // 화면과 서버가 어긋난 채 남지 않는다. 그래서 saveTask·deleteTask·sendSchedule 은 로컬 상태를 손대지 않는다.
       useEffect(()=>{
-        Promise.all([
-          tasksRef().once('value'),
-          firebase.database().ref(`personal-schedules/${uid}`).once('value'),
-        ]).then(([t, s]) => {
-          setTasks(Object.values(t.val() || {}));
-          setSchedules(Object.entries(s.val() || {}).map(([id, v]) => ({ ...v, id })));
-          setLoaded(true);
-        }).catch(e => { showToast('불러오기 실패: ' + e.message, 'error'); setLoaded(true); });
+        const tRef = tasksRef();
+        const sRef = firebase.database().ref(`personal-schedules/${uid}`);
+        const cRef = firebase.database().ref('.info/connected');
+        const onTasks = tRef.on('value',
+          s => { setTasks(Object.values(s.val() || {})); setLoaded(true); },
+          e => { showToast('불러오기 실패: ' + e.message, 'error'); setLoaded(true); });
+        const onSched = sRef.on('value',
+          s => setSchedules(Object.entries(s.val() || {}).map(([id, v]) => ({ ...v, id }))),
+          e => showToast('불러오기 실패: ' + e.message, 'error'));
+        const onConn = cRef.on('value', s => setConnected(s.val() === true));
+        return () => { tRef.off('value', onTasks); sRef.off('value', onSched); cRef.off('value', onConn); };
       }, []);
 
       useEffect(()=>{
@@ -994,22 +1015,58 @@ html, body { overscroll-behavior-y: none; }
       }, [dark]);
 
       useEffect(()=>{
-        if (selected) {
-          const fresh = tasks.find(t=>t.id===selected.id);
-          if (fresh && fresh !== selected) setSelected(fresh);
-        }
+        if (!selected) return;
+        const fresh = tasks.find(t=>t.id===selected.id);
+        if (!fresh) { if (loaded) setSelected(null); }   // 다른 기기에서 지운 목표 — 상세를 닫는다 (열어 두면 고칠 때 되살아난다)
+        else if (fresh !== selected) setSelected(fresh);
       }, [tasks]);
+
+      // 연결이 끊긴 채 고친 것은 연결될 때까지 서버에 못 가고, 그 전에 앱을 닫으면 사라진다 (웹 SDK는 디스크에 남기지 않는다).
+      // 사용자가 알 수 있게 한 줄 띄운다. 잠깐 끊긴 것(앱 전환 뒤 재연결 등)은 3초 안에 돌아오면 보이지 않는다
+      const noticeShown = useRef(false);
+      useEffect(()=>{
+        // 폭 360(폴드 접은 화면)에서 한 줄에 들어가는 길이로 (두 줄이 되면 ＋ 버튼을 가린다)
+        const text = !connected
+          ? (pending ? `연결 안 됨 · 저장 대기 ${pending}건 — 연결될 때까지 앱을 닫지 마세요`
+                     : '연결 안 됨 — 다른 기기에서 고친 내용이 안 보일 수 있어요')
+          : (pending ? `저장 중… ${pending}건` : '');
+        if (!text) { noticeShown.current = false; setNotice(''); return; }
+        if (noticeShown.current || (!connected && pending)) { noticeShown.current = true; setNotice(text); return; }
+        const t = setTimeout(()=>{ noticeShown.current = true; setNotice(text); }, 3000);
+        return () => clearTimeout(t);
+      }, [connected, pending]);
 
       function showToast(msg, type='success') {
         setToast({ msg, type });
         setTimeout(()=>setToast(null), 3000);
       }
+      // 서버 응답을 기다리는 쓰기를 센다 (위 안내용)
+      function track(p) {
+        setPending(n => n + 1);
+        const done = () => setPending(n => n - 1);
+        p.then(done, done);
+        return p;
+      }
 
-      // ── CRUD (RTDB에 곧바로 쓰고 로컬 상태 갱신) ──
-      function saveTask(task) {
-        tasksRef().child(task.id).set(task)
-          .catch(e => showToast('저장 실패: ' + e.message, 'error'));
-        setTasks(p => p.some(t=>t.id===task.id) ? p.map(t=>t.id===task.id?task:t) : [task, ...p]);
+      // ── 저장 (RTDB) ──
+      // 과제를 통째로 set 하지 않고 transaction 으로 "지금 서버에 있는 값"에 고친 부분만 얹는다 (2026-10-13).
+      // 두 기기가 같은 목표를 고치거나, 연결이 끊긴 사이 다른 기기가 먼저 저장했어도 서로 덮어쓰지 않는다 —
+      // 서버 값이 그사이 바뀌어 있으면 SDK가 patch 를 그 값으로 다시 돌려 둘을 합친다. 데이터 모양은 그대로다.
+      //   saveTask(task)           새 과제 (통째로)
+      //   saveTask(id, cur => …)   고치기. cur 는 저장 시점의 최신 과제. 함수는 부작용 없이 새 값만 돌려준다 (여러 번 불릴 수 있다)
+      function saveTask(idOrTask, patch) {
+        const id = patch ? idOrTask : idOrTask.id;
+        const p = tasksRef().child(id).transaction(cur => {
+          if (!patch) return idOrTask;
+          if (cur == null) return;                     // 이미 지워진 목표 — 되살리지 않고 중단 (committed: false)
+          return { ...patch(cur), updatedAt: Date.now() };
+        });
+        track(p)
+          .then(r => { if (!r.committed) showToast('이미 지워진 목표라 저장하지 않았어요', 'error'); })
+          .catch(e => {
+            if (e && e.message === 'set') return;      // 저장을 기다리는 사이 이 목표를 지웠을 때 SDK가 transaction 을 이렇게 취소한다
+            showToast('저장 실패: ' + e.message, 'error');
+          });
       }
       function deleteTask(id) {
         // 과제를 지우면 Storage의 이미지 원본·썸네일도 같이 지운다 (실패해도 과제 삭제는 진행)
@@ -1018,8 +1075,7 @@ html, body { overscroll-behavior-y: none; }
           if (img.path) imgRef(img.path).delete().catch(()=>{});
           if (img.thumbPath) imgRef(img.thumbPath).delete().catch(()=>{});
         }
-        tasksRef().child(id).remove().catch(e => showToast('삭제 실패: ' + e.message, 'error'));
-        setTasks(p => p.filter(t=>t.id!==id));
+        track(tasksRef().child(id).remove()).catch(e => showToast('삭제 실패: ' + e.message, 'error'));
         setSelected(null);
       }
       function sendSchedule(task, dateStr, timeStr) {
@@ -1031,16 +1087,17 @@ html, body { overscroll-behavior-y: none; }
           start = new Date(`${dateStr}T00:00:00`).getTime();
           end = new Date(`${dateStr}T23:59:59`).getTime(); allDay = true;
         }
+        // 날짜 칸을 비우고 보내면 start 가 NaN 이 되어 set 이 예외를 던지고 아무 반응이 없었다
+        if (!dateStr || isNaN(start)) { showToast('날짜를 확인해 주세요', 'error'); return; }
         const rec = {
           title: task.title, start, end, allDay, repeat: 'none',
           done: false, location: '', memo: `[목표:${task.id}] 목표 관리자에서 보냄`,
           createdAt: Date.now(),
         };
         const ref = firebase.database().ref(`personal-schedules/${uid}`).push();
-        ref.set(rec)
+        track(ref.set(rec))
           .then(()=> showToast(`${fmtDate(dateStr)} 일정으로 보냈습니다 📅`))
           .catch(e => showToast('일정 전송 실패: ' + e.message, 'error'));
-        setSchedules(p => [...p, { ...rec, id: ref.key }]);
       }
 
       // ── 뒤로 스와이프: 열린 창 닫기 (앱 종료 방지) ──
@@ -1156,6 +1213,11 @@ html, body { overscroll-behavior-y: none; }
             <TaskDetail task={selected} uid={uid} schedules={schedules}
               onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
               onSendSchedule={sendSchedule} onToast={showToast} />
+          )}
+          {/* 연결 끊김·저장 대기 안내 — 맨 아래 한 줄. 상세 창(z-30)·새 과제 창(z-40) 위, ＋ 버튼(bottom 20~24px) 아래 */}
+          {notice && (
+            <div className="wm-notice fixed bottom-0 inset-x-0 z-40 px-3 py-0.5 text-center text-[11px] leading-4 bg-amber-100 text-amber-800 dark:bg-amber-900/90 dark:text-amber-100"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 2px)' }}>{notice}</div>
           )}
           <Toast toast={toast} />
         </div>
