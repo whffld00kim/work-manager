@@ -556,17 +556,21 @@ html, body { overscroll-behavior-y: none; }
                 rej, res);
             });
             const url = await ref.getDownloadURL();
-            let thumbUrl = null, width = null, height = null;
+            let thumbUrl = null, thumbPath = null, width = null, height = null;
             const th = await makeThumb(file);
             if (th) {
               width = th.width; height = th.height;
               if (th.blob) {
-                const tref = imgRef(`${base}_thumb.jpg`);
-                await tref.put(th.blob, { contentType: 'image/jpeg', cacheControl: 'private, max-age=31536000, immutable' });
-                thumbUrl = await tref.getDownloadURL();
+                // 썸네일은 덤이다 — 실패해도 원본은 이미 올라갔으니 기록은 남긴다 (목록·카드는 원본을 보여준다)
+                try {
+                  const tref = imgRef(`${base}_thumb.jpg`);
+                  await tref.put(th.blob, { contentType: 'image/jpeg', cacheControl: 'private, max-age=31536000, immutable' });
+                  thumbPath = tref.fullPath;
+                  thumbUrl = await tref.getDownloadURL();
+                } catch (e) { /* 썸네일 없이 진행 */ }
               }
             }
-            added.push({ id, name, path: ref.fullPath, url, thumbPath: thumbUrl ? `${base}_thumb.jpg` : null, thumbUrl,
+            added.push({ id, name, path: ref.fullPath, url, thumbPath, thumbUrl,
               size: file.size, type: file.type, width, height, createdAt: Date.now() });
           }
           // 올리는 동안 이 화면의 task 는 옛것일 수 있다 (그사이 남긴 기록 등) — 최신 과제에 사진만 덧붙인다
