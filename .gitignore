@@ -2,3 +2,6 @@ node_modules/
 test-results/
 playwright-report/
 test/.cache/
+
+# Firebase Hosting 배포 임시 파일
+.firebase/

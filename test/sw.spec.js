@@ -24,8 +24,9 @@ test('sw.js 의 OWN·CDN 목록은 index.html·manifest 가 부르는 파일과 
   const ownFiles = new Set(['./', './index.html']);
   for (const m of html.matchAll(/<link rel="(?:manifest|apple-touch-icon)" href="([^"]+)"/g)) ownFiles.add('./' + m[1]);
   for (const ic of manifest.icons) ownFiles.add('./' + ic.src);
+  for (const m of html.matchAll(/<script src="\.\/([^"]+)"/g)) ownFiles.add('./' + m[1]);   // 미리 변환한 app.js (2026-10-15)
   expect([...OWN].sort()).toEqual([...ownFiles].sort());
-  for (const f of OWN) if (f !== './') expect(fs.existsSync(path.join(ROOT, f))).toBe(true);
+  for (const f of OWN) if (f !== './') expect(fs.existsSync(path.join(ROOT, f.split('?')[0]))).toBe(true);   // app.js?v= 는 물음표 앞이 파일
   expect(manifest.start_url).toBe('./index.html');
 });
 

@@ -1,0 +1,1000 @@
+/* 목표 관리 화면 (React). ⚠ 이 파일이 원본이다 — 고친 뒤 `npm run build`로 ../app.js 를 다시 만든다 (2026-10-15).
+   전엔 index.html 안의 <script type="text/babel">을 폰 브라우저가 열 때마다 변환했다. 이제 미리 변환한 app.js 를 부른다 */
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // ═══ 상수 ═══
+    const CATEGORIES = ['투자','가족','집·이사','자기계발','건강','앱개발','기타'];
+    const STATUSES   = ['대기','진행','보류','완료','중단'];
+    const ACTIVE_STATUSES = ['진행','대기','보류'];
+    const PRIORITIES = ['높음','보통','낮음'];
+
+    const CAT_COLORS = {
+      '투자':'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
+      '가족':'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
+      '집·이사':'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
+      '자기계발':'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300',
+      '건강':'bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-300',
+      '앱개발':'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
+      '기타':'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+    };
+    const STATUS_COLORS = {
+      '진행':'bg-blue-500', '대기':'bg-slate-400', '보류':'bg-amber-400',
+      '완료':'bg-emerald-500', '중단':'bg-slate-500',
+    };
+    const PRIO_DOT = { '높음':'bg-red-500', '보통':'bg-amber-400', '낮음':'bg-slate-300 dark:bg-slate-600' };
+
+    const AUTH_ERRORS = {
+      'auth/invalid-email':'이메일 형식이 올바르지 않아요',
+      'auth/invalid-credential':'이메일 또는 비밀번호가 맞지 않아요',
+      'auth/wrong-password':'이메일 또는 비밀번호가 맞지 않아요',
+      'auth/user-not-found':'등록되지 않은 계정이에요',
+      'auth/too-many-requests':'시도가 너무 많아요. 잠시 후 다시 해주세요',
+      'auth/network-request-failed':'네트워크에 연결할 수 없어요',
+      'auth/unauthorized-domain':'이 주소가 Firebase 승인 도메인에 없어요',
+    };
+
+    // ═══ 이미지 저장소 (Firebase Storage) ═══
+    // 목표별 이미지 원본은 RTDB가 아니라 Storage 전용 버킷에 둔다 (2026-09-19).
+    // RTDB(task.images)에는 이름·경로·URL·크기 같은 메타데이터만 남긴다.
+    // 규칙: minsung-buboo2/storage.rules — 본인 uid 경로만, 이미지만, 30MB 미만.
+    const IMG_BUCKET = 'gs://minsung-buboo2-goal-images';
+    const imgRef = (path) => firebase.app().storage(IMG_BUCKET).ref(path);
+    const IMG_MAX = 30 * 1024 * 1024;
+
+    function fmtBytes(n) {
+      if (!n && n !== 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+      return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+    function safeName(name) { return (name || 'image').replace(/[\/\\#?%*:"<>|]/g, '_'); }
+
+    // 원본은 그대로 올리고, 목록용 썸네일(긴 변 480px JPEG)은 브라우저에서 만들어 따로 올린다.
+    // 원본이 5MB짜리 사진이라도 목록을 열 때 매번 그걸 내려받지 않게 하려는 것.
+    function makeThumb(file, max = 480) {
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const im = new Image();
+        im.onload = () => {
+          const w = im.naturalWidth, h = im.naturalHeight;
+          const s = Math.min(1, max / Math.max(w, h));
+          const c = document.createElement('canvas');
+          c.width = Math.round(w * s); c.height = Math.round(h * s);
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          c.toBlob(b => resolve({ blob: b, width: w, height: h }), 'image/jpeg', 0.8);
+        };
+        im.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        im.src = url;
+      });
+    }
+
+    // ═══ 유틸 ═══
+    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+    function today() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function fmtDate(d) { return d ? d.replaceAll('-', '.') : '─'; }
+    function dday(targetDate, status) {
+      if (!targetDate || status === '완료' || status === '중단') return null;
+      const now = new Date(); now.setHours(0,0,0,0);
+      const t = new Date(targetDate + 'T00:00:00');
+      const n = Math.floor((t - now) / 86400000);
+      if (n === 0) return { text:'D-Day', cls:'text-amber-500 font-bold' };
+      if (n > 0)  return { text:`D-${n}`, cls: n <= 7 ? 'text-orange-500 font-semibold' : 'text-sky-500' };
+      return { text:`D+${Math.abs(n)}`, cls:'text-red-500 font-semibold' };
+    }
+    function schedDate(s) {
+      const d = new Date(s.start);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function schedDone(s) {
+      if (s.done) return true;
+      return Array.isArray(s.doneDates) && s.doneDates.includes(schedDate(s));
+    }
+
+    // ═══ 화면 판정 — CSS의 @media와 같은 조건 (조건을 바꾸면 둘 다) ═══
+    // 태블릿 가로(2026-09-28): 목록|상세 두 칸 + 상세 안 두 단 · 폴드7 펼침/태블릿 세로(2026-10-09): 목록|상세 두 칸, 상세 안은 폰처럼 한 줄
+    const TABLET_MQ = '(min-width: 900px) and (orientation: landscape)';
+    const FOLD_MQ = '(min-width: 600px) and (max-width: 899px) and (min-height: 500px), (min-width: 600px) and (orientation: portrait)';
+    function useMQ(query) {
+      const [on, setOn] = useState(() => window.matchMedia(query).matches);
+      useEffect(() => {
+        const mq = window.matchMedia(query);
+        const f = () => setOn(mq.matches);
+        mq.addEventListener ? mq.addEventListener('change', f) : mq.addListener(f);
+        return () => { mq.removeEventListener ? mq.removeEventListener('change', f) : mq.removeListener(f); };
+      }, [query]);
+      return on;
+    }
+
+    // ═══ Toast ═══
+    function Toast({ toast }) {
+      if (!toast) return null;
+      const color = toast.type === 'error' ? 'bg-red-500' : 'bg-slate-800 dark:bg-slate-200 dark:text-slate-900';
+      return (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-white text-sm shadow-lg ${color}`}>
+          {toast.msg}
+        </div>
+      );
+    }
+
+    // ═══ 로그인 화면 ═══
+    function Login() {
+      const [email, setEmail] = useState('');
+      const [pw, setPw] = useState('');
+      const [err, setErr] = useState('');
+      const [busy, setBusy] = useState(false);
+      function submit(e) {
+        e.preventDefault();
+        setBusy(true); setErr('');
+        firebase.auth().signInWithEmailAndPassword(email.trim(), pw)
+          .catch(ex => { setErr(AUTH_ERRORS[ex.code] || '로그인에 실패했어요'); setBusy(false); });
+      }
+      // 구글 로그인 (2026-10-15 — 다른 앱들처럼). 계정에 구글이 이미 연결돼 같은 uid로 들어온다.
+      // 연결 안 된 구글 계정은 프로젝트가 새 계정을 막아 두어 admin-restricted-operation 으로 거절된다
+      async function google() {
+        setErr('');
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        try { await firebase.auth().signInWithPopup(provider); }
+        catch (ex) {
+          if (ex.code === 'auth/popup-blocked' || ex.code === 'auth/operation-not-supported-in-this-environment') {
+            try { await firebase.auth().signInWithRedirect(provider); return; } catch (e2) { ex = e2; }
+          }
+          if (ex.code === 'auth/popup-closed-by-user' || ex.code === 'auth/cancelled-popup-request') return;
+          setErr(ex.code === 'auth/admin-restricted-operation' ? '이 구글 계정은 등록되어 있지 않아요. 이메일·비밀번호로 로그인해 주세요' : '로그인에 실패했어요 (' + ex.code + ')');
+        }
+      }
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 px-6">
+          <form onSubmit={submit} className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow p-6 space-y-4">
+            <div className="text-center space-y-1">
+              <div className="text-3xl">📋</div>
+              <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">목표 관리자</h1>
+              <p className="text-xs text-slate-400">민성 스케줄과 같은 계정으로 로그인하세요 (일정 연동)</p>
+            </div>
+            <input type="email" required placeholder="이메일" value={email} onChange={e=>setEmail(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100" />
+            <input type="password" required placeholder="비밀번호" value={pw} onChange={e=>setPw(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100" />
+            {err && <p className="text-xs text-red-500">{err}</p>}
+            <button disabled={busy} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">
+              {busy ? '로그인 중…' : '로그인'}
+            </button>
+            <button type="button" onClick={google} className="w-full py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-semibold">
+              구글 계정으로 로그인
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    // ═══ 새 과제 폼 ═══
+    function TaskForm({ onSave, onClose }) {
+      const [f, setF] = useState({ title:'', category:CATEGORIES[0], status:'진행', priority:'보통', dueDate:'', firstLog:'' });
+      function submit(e) {
+        e.preventDefault();
+        if (!f.title.trim()) return;
+        const now = Date.now();
+        const task = {
+          id: genId(), title: f.title.trim(), category: f.category, status: f.status,
+          priority: f.priority, dueDate: f.dueDate || null,
+          checklist: [], log: f.firstLog.trim() ? [{ id: genId(), date: today(), text: f.firstLog.trim() }] : [],
+          createdAt: now, updatedAt: now, completedAt: null,
+        };
+        onSave(task);
+        onClose();
+      }
+      const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
+      return (
+        <div className="fixed inset-0 z-40 bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+          <form onSubmit={submit} onClick={e=>e.stopPropagation()}
+            className="wm-form w-full sm:max-w-md bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+            <h2 className="font-bold text-slate-800 dark:text-slate-100">새 과제</h2>
+            <input autoFocus required placeholder="과제 제목" value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
+            <div className="grid grid-cols-2 gap-2">
+              <select value={f.category} onChange={e=>setF({...f, category:e.target.value})} className={inputCls}>
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+              <select value={f.priority} onChange={e=>setF({...f, priority:e.target.value})} className={inputCls}>
+                {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={f.status} onChange={e=>setF({...f, status:e.target.value})} className={inputCls}>
+                {ACTIVE_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+              <input type="date" value={f.dueDate} onChange={e=>setF({...f, dueDate:e.target.value})} className={inputCls} title="목표 기한 (선택)" />
+            </div>
+            <textarea placeholder="첫 진행 기록 (선택)" value={f.firstLog} onChange={e=>setF({...f, firstLog:e.target.value})} rows="2" className={inputCls} />
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300">취소</button>
+              <button className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold">추가</button>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    // ═══ 과제 상세 패널 ═══
+    // inline: 오른쪽 칸 안에 열림(덮는 창 ✗) · twoCol: 상세 안을 두 단으로(태블릿 가로만, 폴드는 한 줄)
+    function TaskDetail({ task, uid, schedules, onUpdate, onDelete, onClose, onSendSchedule, onToast, inline, twoCol }) {
+      const [editing, setEditing] = useState(false);
+      const [f, setF] = useState(task);
+      const [newLog, setNewLog] = useState('');
+      const [logDate, setLogDate] = useState(today());
+      const [newCheck, setNewCheck] = useState('');
+      const [schedOpen, setSchedOpen] = useState(false);
+      const [schedDateV, setSchedDateV] = useState(today());
+      const [schedTime, setSchedTime] = useState('');
+      const [uploading, setUploading] = useState(null);   // { done, total, pct }
+      const [viewer, setViewer] = useState(null);         // 크게 보는 이미지 id
+      const fileInput = useRef(null);
+      // 편집 중엔 입력하던 값을 지우지 않는다 — 상태 버튼을 누르거나 다른 기기가 고쳐 task 가 바뀌어도 (2026-10-13)
+      useEffect(()=>{ if (!editing) setF(task); }, [task]);
+      // 고치기는 모두 patch 함수로 — cur 는 저장 시점의 최신 과제 (Main.saveTask 참고). 이 화면의 task 를 통째로 쓰지 않는다
+      const patch = fn => onUpdate(task.id, fn);
+
+      // ── 이미지 첨부 ──
+      const images = task.images || [];
+      async function addImages(fileList) {
+        const files = Array.from(fileList || []).filter(x => x.type.startsWith('image/'));
+        if (!files.length) return;
+        if (window.__wmCached) { onToast('최신 내용을 확인하는 중이에요. 잠시 뒤에 다시 해 주세요', 'error'); return; }
+        const tooBig = files.find(x => x.size >= IMG_MAX);
+        if (tooBig) { onToast(`${tooBig.name}은(는) 30MB를 넘어 올릴 수 없어요`, 'error'); return; }
+        setUploading({ done: 0, total: files.length, pct: 0 });
+        const added = [];
+        try {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const id = genId();
+            const name = safeName(file.name);
+            const base = `goal-images/${uid}/${task.id}/${id}`;
+            // 원본: Content-Disposition을 attachment로 박아 두면 다운로드 URL을 그냥 열어도 파일로 내려온다.
+            const meta = {
+              contentType: file.type,
+              cacheControl: 'private, max-age=31536000, immutable',
+              contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+              customMetadata: { taskId: task.id, originalName: name },
+            };
+            const ref = imgRef(`${base}_${name}`);
+            await new Promise((res, rej) => {
+              ref.put(file, meta).on('state_changed',
+                s => setUploading({ done: i, total: files.length, pct: Math.round(s.bytesTransferred / s.totalBytes * 100) }),
+                rej, res);
+            });
+            const url = await ref.getDownloadURL();
+            let thumbUrl = null, thumbPath = null, width = null, height = null;
+            const th = await makeThumb(file);
+            if (th) {
+              width = th.width; height = th.height;
+              if (th.blob) {
+                // 썸네일은 덤이다 — 실패해도 원본은 이미 올라갔으니 기록은 남긴다 (목록·카드는 원본을 보여준다)
+                try {
+                  const tref = imgRef(`${base}_thumb.jpg`);
+                  await tref.put(th.blob, { contentType: 'image/jpeg', cacheControl: 'private, max-age=31536000, immutable' });
+                  thumbPath = tref.fullPath;
+                  thumbUrl = await tref.getDownloadURL();
+                } catch (e) { /* 썸네일 없이 진행 */ }
+              }
+            }
+            added.push({ id, name, path: ref.fullPath, url, thumbPath, thumbUrl,
+              size: file.size, type: file.type, width, height, createdAt: Date.now() });
+          }
+          // 올리는 동안 이 화면의 task 는 옛것일 수 있다 (그사이 남긴 기록 등) — 최신 과제에 사진만 덧붙인다
+          const list = added.slice();
+          patch(cur => ({ ...cur, images: [...(cur.images||[]), ...list] }));
+          onToast(`이미지 ${added.length}장을 저장했어요 🖼️`);
+        } catch (e) {
+          if (added.length) { const list = added.slice(); patch(cur => ({ ...cur, images: [...(cur.images||[]), ...list] })); }
+          onToast('이미지 업로드 실패: ' + (e && e.message || e), 'error');
+        } finally {
+          setUploading(null);
+          if (fileInput.current) fileInput.current.value = '';
+        }
+      }
+      function delImage(img) {
+        if (!confirm(`「${img.name}」을(를) 원본까지 지울까요?`)) return;
+        imgRef(img.path).delete().catch(()=>{});
+        if (img.thumbPath) imgRef(img.thumbPath).delete().catch(()=>{});
+        patch(cur => ({ ...cur, images: (cur.images||[]).filter(x => x.id !== img.id) }));
+        setViewer(null);
+      }
+      const viewing = viewer ? images.find(x => x.id === viewer) : null;
+
+      const linked = useMemo(() =>
+        schedules.filter(s => (s.memo || '').includes(`[목표:${task.id}]`)).sort((a,b)=>b.start-a.start),
+        [schedules, task.id]);
+
+      const inputCls = "w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100";
+
+      function saveEdit() {
+        const { title, category, priority, dueDate } = f;
+        patch(cur => ({ ...cur, title: title.trim()||cur.title, category, priority, dueDate: dueDate||null }));
+        setEditing(false);
+      }
+      function setStatus(st) {
+        // 완료를 다시 눌러도 처음 완료한 시각을 지킨다
+        patch(cur => ({ ...cur, status: st, completedAt: st==='완료' ? (cur.completedAt || Date.now()) : null }));
+      }
+      function addLog() {
+        if (!newLog.trim()) return;
+        const entry = { id:genId(), date:logDate, text:newLog.trim() };
+        patch(cur => ({ ...cur, log: [...(cur.log||[]), entry] }));
+        setNewLog('');
+      }
+      function delLog(id) {
+        if (!confirm('이 기록을 지울까요?')) return;
+        patch(cur => ({ ...cur, log: (cur.log||[]).filter(l=>l.id!==id) }));
+      }
+      function addCheck() {
+        if (!newCheck.trim()) return;
+        const entry = { id:genId(), text:newCheck.trim(), done:false, doneDate:null };
+        patch(cur => ({ ...cur, checklist: [...(cur.checklist||[]), entry] }));
+        setNewCheck('');
+      }
+      function toggleCheck(id) {
+        const now = (task.checklist||[]).find(c=>c.id===id);
+        const done = !(now && now.done), doneDate = done ? today() : null;   // 누른 시점의 뜻(켬/끔)을 저장한다
+        patch(cur => ({ ...cur, checklist: (cur.checklist||[]).map(c => c.id===id ? { ...c, done, doneDate } : c) }));
+      }
+      function delCheck(id) {
+        patch(cur => ({ ...cur, checklist: (cur.checklist||[]).filter(c=>c.id!==id) }));
+      }
+      function sendSchedule() {
+        onSendSchedule(task, schedDateV, schedTime);
+        setSchedOpen(false); setSchedTime('');
+      }
+
+      const checklist = task.checklist || [];
+      const log = [...(task.log||[])].sort((a,b)=> b.date.localeCompare(a.date) || (b.id>a.id?1:-1));
+      const doneCount = checklist.filter(c=>c.done).length;
+
+      // 카드 조각 — 폰은 한 줄로 쌓고, 태블릿(inline)은 두 단으로 나눠 담는다 (2026-09-28)
+      const infoCard = (<>
+              {/* 기본 정보 */}
+              <div className="wm-d-info bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+                {editing ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={f.category} onChange={e=>setF({...f, category:e.target.value})} className={inputCls}>
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <select value={f.priority} onChange={e=>setF({...f, priority:e.target.value})} className={inputCls}>
+                      {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                    <input type="date" value={f.dueDate||''} onChange={e=>setF({...f, dueDate:e.target.value})} className={`${inputCls} col-span-2`} />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${CAT_COLORS[task.category]||CAT_COLORS['기타']}`}>{task.category}</span>
+                    <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span className={`w-2 h-2 rounded-full ${PRIO_DOT[task.priority]}`}></span>{task.priority}
+                    </span>
+                    <span className="text-xs text-slate-400">기한 {fmtDate(task.dueDate)}</span>
+                    {dday(task.dueDate, task.status) && <span className={`text-xs ${dday(task.dueDate, task.status).cls}`}>{dday(task.dueDate, task.status).text}</span>}
+                  </div>
+                )}
+                {/* 상태 버튼 */}
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUSES.map(st => (
+                    <button key={st} onClick={()=>setStatus(st)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition
+                        ${task.status===st
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400'}`}>
+                      {st}
+                    </button>
+                  ))}
+                </div>
+                {task.completedAt && <p className="text-xs text-emerald-600 dark:text-emerald-400">✓ {new Date(task.completedAt).toLocaleDateString('ko-KR')} 완료</p>}
+              </div>
+      </>);
+      const imgCard = (<>
+              {/* 이미지 — 목표를 떠올리게 하는 사진. 원본은 Storage, 여기엔 썸네일 */}
+              <div className="wm-d-img bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">🖼️ 이미지 {images.length > 0 && <span className="font-normal text-xs text-slate-400">({images.length})</span>}</h3>
+                  <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={e=>addImages(e.target.files)} />
+                  <button onClick={()=>fileInput.current && fileInput.current.click()} disabled={!!uploading}
+                    className="text-xs font-medium text-blue-600 dark:text-blue-400 disabled:opacity-50">
+                    {uploading ? `올리는 중 ${uploading.done + 1}/${uploading.total} · ${uploading.pct}%` : '＋ 첨부'}
+                  </button>
+                </div>
+                {uploading && (
+                  <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: uploading.pct + '%' }}></div>
+                  </div>
+                )}
+                {images.length === 0 && !uploading
+                  ? <p className="text-xs text-slate-400">이 목표를 세우게 한 사진, 도달했을 때의 모습을 원본 그대로 보관합니다.</p>
+                  : (
+                    <div className="wm-d-thumbs grid grid-cols-3 gap-2">
+                      {images.map(img => (
+                        <button key={img.id} onClick={()=>setViewer(img.id)}
+                          className="relative aspect-square rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
+                          <img src={img.thumbUrl || img.url} alt={img.name} loading="lazy" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+              </div>
+      </>);
+      const checkCard = (<>
+              {/* 체크리스트 */}
+              <div className="wm-d-check bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">체크리스트</h3>
+                  {checklist.length > 0 && <span className="text-xs text-slate-400">{doneCount}/{checklist.length}</span>}
+                </div>
+                {checklist.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 group">
+                    <button onClick={()=>toggleCheck(c.id)}
+                      className={`w-5 h-5 rounded-md border flex items-center justify-center text-xs shrink-0
+                        ${c.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
+                      {c.done ? '✓' : ''}
+                    </button>
+                    <span className={`flex-1 text-sm ${c.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}>{c.text}</span>
+                    {c.done && c.doneDate && <span className="text-[10px] text-slate-400">{fmtDate(c.doneDate)}</span>}
+                    <button onClick={()=>delCheck(c.id)} className="text-slate-300 dark:text-slate-600 hover:text-red-400 text-xs px-1">✕</button>
+                  </div>
+                ))}
+                <div className="flex gap-2 pt-1">
+                  <input placeholder="하위 단계 추가" value={newCheck} onChange={e=>setNewCheck(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); addCheck(); } }} className={inputCls} />
+                  <button onClick={addCheck} className="px-3 rounded-lg bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300">＋</button>
+                </div>
+              </div>
+      </>);
+      const schedCard = (<>
+              {/* 일정으로 보내기 + 연동된 일정 */}
+              <div className="wm-d-sched bg-white dark:bg-slate-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">📅 일정 연동 <span className="font-normal text-xs text-slate-400">(민성 스케줄)</span></h3>
+                  <button onClick={()=>setSchedOpen(!schedOpen)} className="text-xs font-medium text-blue-600 dark:text-blue-400">일정으로 보내기</button>
+                </div>
+                {schedOpen && (
+                  <div className="flex flex-wrap gap-2 items-center bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <input type="date" value={schedDateV} onChange={e=>setSchedDateV(e.target.value)} className={`${inputCls} !w-auto flex-1`} />
+                    <input type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} className={`${inputCls} !w-auto`} title="비우면 종일" />
+                    <button onClick={sendSchedule} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold">보내기</button>
+                  </div>
+                )}
+                {linked.length === 0
+                  ? <p className="text-xs text-slate-400">아직 연동된 일정이 없습니다. 실행할 날을 정하면 일정 앱에 나타납니다.</p>
+                  : linked.map(s => (
+                    <div key={s.id} className="flex items-center gap-2 text-sm">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${schedDone(s) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}></span>
+                      <span className="text-slate-600 dark:text-slate-300">{fmtDate(schedDate(s))}</span>
+                      <span className="flex-1 truncate text-slate-500 dark:text-slate-400">{s.title}</span>
+                      {schedDone(s) && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">완료</span>}
+                    </div>
+                  ))}
+              </div>
+      </>);
+      const logCard = (<>
+              {/* 진행 로그 */}
+              <div className="wm-d-log bg-white dark:bg-slate-800 rounded-xl p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">진행 로그 <span className="font-normal text-xs text-slate-400">({log.length})</span></h3>
+                <div className="space-y-1.5">
+                  <div className="flex gap-2">
+                    <input type="date" value={logDate} onChange={e=>setLogDate(e.target.value)} className={`${inputCls} !w-auto`} />
+                    <button onClick={addLog} className="px-3 rounded-lg bg-blue-600 text-white text-sm font-semibold ml-auto">기록</button>
+                  </div>
+                  <textarea placeholder="오늘 진행한 내용…" value={newLog} onChange={e=>setNewLog(e.target.value)} rows="2" className={inputCls} />
+                </div>
+                <div className="space-y-3 pt-1">
+                  {log.map(l => (
+                    <div key={l.id} className="flex gap-3 group">
+                      <div className="flex flex-col items-center">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0"></span>
+                        <span className="flex-1 w-px bg-slate-200 dark:bg-slate-700"></span>
+                      </div>
+                      <div className="flex-1 pb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-slate-400">{fmtDate(l.date)}</span>
+                          <button onClick={()=>delLog(l.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 text-xs">✕</button>
+                        </div>
+                        <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{l.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {log.length === 0 && <p className="text-xs text-slate-400">진행 기록이 여기에 쌓입니다.</p>}
+                </div>
+              </div>
+      </>);
+      const delBlock = (<>
+              {/* 삭제 */}
+              <button onClick={()=>{ if(confirm('이 과제를 이력까지 전부 삭제할까요?\n(완료 처리만 하려면 상태를 "완료"로 바꾸세요)')) onDelete(task.id); }}
+                className="wm-d-del w-full py-2.5 rounded-xl border border-red-200 dark:border-red-900 text-red-500 text-sm">과제 삭제</button>
+              <p className="wm-d-created text-center text-[10px] text-slate-300 dark:text-slate-600 pb-4">
+                생성 {new Date(task.createdAt).toLocaleDateString('ko-KR')}
+              </p>
+      </>);
+
+      return (
+        <div className={inline ? 'wm-detail-inline' : 'fixed inset-0 z-30 bg-black/40 flex justify-end'} onClick={inline ? undefined : onClose}>
+          <div onClick={e=>e.stopPropagation()}
+            className={inline ? 'wm-detail-scroll bg-slate-50 dark:bg-slate-900' : 'w-full sm:max-w-lg h-full bg-slate-50 dark:bg-slate-900 overflow-y-auto shadow-2xl'}>
+            {/* 헤더 — z-10: 아래 이미지 썸네일(relative)이 스크롤하며 제목 위로 올라오던 것 (2026-10-09 폴드 캡처) */}
+            <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center gap-2">
+              <button onClick={onClose} className="text-slate-400 text-xl px-1">←</button>
+              {editing ? (
+                <input value={f.title} onChange={e=>setF({...f, title:e.target.value})} className={inputCls} />
+              ) : (
+                <h2 className="flex-1 font-bold text-slate-800 dark:text-slate-100 truncate">{task.title}</h2>
+              )}
+              {editing
+                ? <button onClick={saveEdit} className="text-sm font-semibold text-blue-600 px-2">저장</button>
+                : <button onClick={()=>setEditing(true)} className="text-sm text-slate-400 px-2">편집</button>}
+            </div>
+
+            <div className="wm-d-body p-4 space-y-5">
+              {inline && twoCol ? (<>
+                {infoCard}
+                <div className="wm-d-col">{imgCard}{checkCard}<div className="wm-d-spacer"></div>{delBlock}</div>
+                <div className="wm-d-col">{schedCard}{logCard}</div>
+              </>) : (<>{infoCard}{imgCard}{checkCard}{schedCard}{logCard}{delBlock}</>)}
+            </div>
+          </div>
+
+          {/* 이미지 크게 보기 — 원본을 그대로 보여주고, 다운로드는 원본 파일로 */}
+          {viewing && (
+            <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={e=>{ e.stopPropagation(); setViewer(null); }}>
+              <div className="flex items-center gap-2 px-4 py-3 text-white/90" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }} onClick={e=>e.stopPropagation()}>
+                <button onClick={()=>setViewer(null)} className="text-xl px-1">←</button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm truncate">{viewing.name}</p>
+                  <p className="text-[11px] text-white/50">
+                    {viewing.width && viewing.height ? `${viewing.width}×${viewing.height} · ` : ''}{fmtBytes(viewing.size)}
+                    {viewing.createdAt ? ` · ${new Date(viewing.createdAt).toLocaleDateString('ko-KR')}` : ''}
+                  </p>
+                </div>
+                <a href={viewing.url} download={viewing.name} target="_blank" rel="noopener"
+                  className="px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-medium" title="원본 파일 다운로드">⬇ 원본</a>
+                <button onClick={()=>delImage(viewing)} className="px-2 py-1.5 rounded-lg text-xs text-red-300 hover:bg-white/10" title="삭제">🗑</button>
+              </div>
+              <div className="flex-1 min-h-0 flex items-center justify-center p-2" onClick={e=>e.stopPropagation()}>
+                <img src={viewing.url} alt={viewing.name} className="max-w-full max-h-full object-contain" />
+              </div>
+              {images.length > 1 && (
+                <div className="flex gap-1.5 overflow-x-auto px-4 py-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }} onClick={e=>e.stopPropagation()}>
+                  {images.map(img => (
+                    <button key={img.id} onClick={()=>setViewer(img.id)}
+                      className={`w-14 h-14 shrink-0 rounded-md overflow-hidden border-2 ${img.id===viewing.id ? 'border-white' : 'border-transparent opacity-60'}`}>
+                      <img src={img.thumbUrl || img.url} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══ 과제 카드 ═══
+    function TaskCard({ task, onSelect, active }) {
+      const checklist = task.checklist || [];
+      const doneCount = checklist.filter(c=>c.done).length;
+      const pct = checklist.length ? Math.round(doneCount / checklist.length * 100) : null;
+      const lastLog = (task.log||[]).reduce((m,l)=> l.date > m ? l.date : m, '');
+      const dd = dday(task.dueDate, task.status);
+      const cover = (task.images || [])[0];
+      return (
+        <button onClick={()=>onSelect(task)}
+          className={`wm-card${active ? ' wm-card-active' : ''} w-full text-left bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition space-y-2`}>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[task.status]}`}></span>
+            <span className="flex-1 font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{task.title}</span>
+            {dd && <span className={`text-xs shrink-0 ${dd.cls}`}>{dd.text}</span>}
+            {cover && <img src={cover.thumbUrl || cover.url} alt="" loading="lazy" className="w-9 h-9 rounded-md object-cover shrink-0" />}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${CAT_COLORS[task.category]||CAT_COLORS['기타']}`}>{task.category}</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${PRIO_DOT[task.priority]}`}></span>
+            <span>{task.status}</span>
+            {lastLog && <span className="ml-auto">최근 기록 {fmtDate(lastLog)}</span>}
+          </div>
+          {pct !== null && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: pct + '%' }}></div>
+              </div>
+              <span className="text-[10px] text-slate-400">{doneCount}/{checklist.length}</span>
+            </div>
+          )}
+        </button>
+      );
+    }
+
+    // ═══ 태블릿 오른쪽 칸 — 목표를 고르기 전에 보이는 한눈에 보기 (2026-09-28) ═══
+    function Overview({ tasks, onSelect }) {
+      const cnt = st => tasks.filter(t => t.status === st).length;
+      const active = tasks.filter(t => ACTIVE_STATUSES.includes(t.status));
+      const due = active.filter(t => t.dueDate).sort((a,b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 6);
+      const recent = tasks.flatMap(t => (t.log||[]).map(l => ({ ...l, task: t })))
+        .sort((a,b) => b.date.localeCompare(a.date) || (b.id > a.id ? 1 : -1)).slice(0, 6);
+      const byCat = CATEGORIES.map(c => [c, active.filter(t => t.category === c).length]).filter(x => x[1] > 0);
+      const maxCat = Math.max(1, ...byCat.map(x => x[1]));
+      const card = 'bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm';
+      const h3 = 'text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3';
+      return (
+        <div className="wm-overview">
+          <div className="wm-ov-tiles">
+            {STATUSES.map(st => (
+              <div key={st} className={`${card} !p-4`}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[st]}`}></span>{st}
+                </div>
+                <div className="text-3xl font-bold text-slate-800 dark:text-slate-100 mt-1">{cnt(st)}</div>
+              </div>
+            ))}
+          </div>
+          <div className={`${card} wm-ov-col`}>
+            <h3 className={h3}>⏰ 다가오는 기한</h3>
+            {due.length === 0 && <p className="text-xs text-slate-400">기한을 정한 진행 중 목표가 없습니다.</p>}
+            {due.map(t => { const dd = dday(t.dueDate, t.status); return (
+              <button key={t.id} onClick={()=>onSelect(t)} className="wm-ov-row">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[t.status]}`}></span>
+                <span className="flex-1 truncate text-sm text-slate-700 dark:text-slate-200">{t.title}</span>
+                <span className="text-xs text-slate-400">{fmtDate(t.dueDate)}</span>
+                {dd && <span className={`text-xs w-14 text-right ${dd.cls}`}>{dd.text}</span>}
+              </button>
+            ); })}
+          </div>
+          <div className={`${card} wm-ov-col`}>
+            <h3 className={h3}>📝 최근 진행 기록</h3>
+            {recent.length === 0 && <p className="text-xs text-slate-400">진행 기록이 아직 없습니다.</p>}
+            {recent.map(l => (
+              <button key={l.task.id + l.id} onClick={()=>onSelect(l.task)} className="wm-ov-row !items-start">
+                <span className="text-xs font-medium text-slate-400 shrink-0 w-20 pt-0.5">{fmtDate(l.date)}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-xs text-blue-600 dark:text-blue-400 truncate">{l.task.title}</span>
+                  <span className="block text-sm text-slate-700 dark:text-slate-200 truncate">{l.text}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className={`${card} wm-ov-cats`}>
+            <h3 className={h3}>분류별 진행 중 목표</h3>
+            {byCat.length === 0 && <p className="text-xs text-slate-400">진행 중인 목표가 없습니다.</p>}
+            <div className="wm-ov-catlist">
+              {byCat.map(([c, n]) => (
+                <div key={c} className="flex items-center gap-3">
+                  <span className={`px-2 py-0.5 rounded-md text-xs font-medium w-20 text-center ${CAT_COLORS[c]}`}>{c}</span>
+                  <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: (n / maxCat * 100) + '%' }}></div>
+                  </div>
+                  <span className="text-xs text-slate-500 w-6 text-right">{n}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="wm-ov-hint text-xs text-slate-400">왼쪽 목록에서 목표를 누르면 여기에 상세가 열립니다.</p>
+        </div>
+      );
+    }
+
+    // ═══ 메인 앱 ═══
+    function Main({ user, initial }) {
+      const [tasks, setTasks] = useState(()=> initial ? initial.tasks : []);
+      const [schedules, setSchedules] = useState(()=> initial ? initial.schedules : []);
+      const [loaded, setLoaded] = useState(!!initial);
+      const [tab, setTab] = useState('active');           // active | archive
+      const [catFilter, setCatFilter] = useState('');
+      const [selected, setSelected] = useState(null);
+      const [showForm, setShowForm] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [dark, setDark] = useState(()=> localStorage.getItem('wm-dark')==='true' ||
+        (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches));
+      const [connected, setConnected] = useState(true);   // RTDB 연결 상태 (.info/connected)
+      const [pending, setPending] = useState(0);          // 서버 응답을 기다리는 쓰기 수
+      const [notice, setNotice] = useState('');           // 연결 끊김·저장 대기 안내 (아래 useEffect)
+
+      const tablet = useMQ(TABLET_MQ);          // 태블릿 가로: 두 칸 + 상세 두 단
+      const fold   = useMQ(FOLD_MQ);            // 폴드7 펼침·태블릿 세로: 두 칸, 상세는 한 줄 (2026-10-09)
+      const split  = tablet || fold;            // 목록|상세 두 칸으로 그릴지
+      const uid = user.uid;
+      const tasksRef = () => firebase.database().ref(`long-tasks/${uid}/tasks`);
+
+      // ── 구독 (2026-10-13) ──
+      // 그전엔 once('value')로 한 번만 읽어서, 태블릿을 오래 켜 둔 채 폰에서 고치면 태블릿은 옛 화면인 줄 모르고
+      // 과제를 통째로 덮어썼다. on('value')면 다른 기기의 변경이 곧바로 내려오고, 이 기기의 쓰기도 SDK가
+      // 서버 응답 전에 먼저 반영해 준다(오프라인 포함). 저장이 거부되면 SDK가 서버 값으로 되돌려 주므로
+      // 화면과 서버가 어긋난 채 남지 않는다. 그래서 saveTask·deleteTask·sendSchedule 은 로컬 상태를 손대지 않는다.
+      useEffect(()=>{
+        if (user.cached) return;                  // 사본으로 연 동안은 구독하지 않는다 — 로그인 확인 뒤 Main 을 새로 띄워 그때 건다
+        const tRef = tasksRef();
+        const sRef = firebase.database().ref(`personal-schedules/${uid}`);
+        const cRef = firebase.database().ref('.info/connected');
+        const onTasks = tRef.on('value',
+          s => { const t = Object.values(s.val() || {}); setTasks(t); setLoaded(true); saveWmCacheSoon(user, { tasks: t }); },
+          e => { showToast('불러오기 실패: ' + e.message, 'error'); setLoaded(true); });
+        const onSched = sRef.on('value',
+          s => { const l = Object.entries(s.val() || {}).map(([id, v]) => ({ ...v, id })); setSchedules(l); saveWmCacheSoon(user, { schedules: l }); },
+          e => showToast('불러오기 실패: ' + e.message, 'error'));
+        const onConn = cRef.on('value', s => setConnected(s.val() === true));
+        return () => { tRef.off('value', onTasks); sRef.off('value', onSched); cRef.off('value', onConn); };
+      }, []);
+
+      useEffect(()=>{
+        localStorage.setItem('wm-dark', dark);
+        document.documentElement.classList.toggle('dark', dark);
+      }, [dark]);
+
+      useEffect(()=>{
+        if (!selected) return;
+        const fresh = tasks.find(t=>t.id===selected.id);
+        if (!fresh) { if (loaded) setSelected(null); }   // 다른 기기에서 지운 목표 — 상세를 닫는다 (열어 두면 고칠 때 되살아난다)
+        else if (fresh !== selected) setSelected(fresh);
+      }, [tasks]);
+
+      // 연결이 끊긴 채 고친 것은 연결될 때까지 서버에 못 가고, 그 전에 앱을 닫으면 사라진다 (웹 SDK는 디스크에 남기지 않는다).
+      // 사용자가 알 수 있게 한 줄 띄운다. 잠깐 끊긴 것(앱 전환 뒤 재연결 등)은 3초 안에 돌아오면 보이지 않는다
+      const noticeShown = useRef(false);
+      useEffect(()=>{
+        // 폭 360(폴드 접은 화면)에서 한 줄에 들어가는 길이로 (두 줄이 되면 ＋ 버튼을 가린다)
+        const text = !connected
+          ? (pending ? `연결 안 됨 · 저장 대기 ${pending}건 — 연결될 때까지 앱을 닫지 마세요`
+                     : '연결 안 됨 — 다른 기기에서 고친 내용이 안 보일 수 있어요')
+          : (pending ? `저장 중… ${pending}건` : '');
+        if (!text) { noticeShown.current = false; setNotice(''); return; }
+        if (noticeShown.current || (!connected && pending)) { noticeShown.current = true; setNotice(text); return; }
+        const t = setTimeout(()=>{ noticeShown.current = true; setNotice(text); }, 3000);
+        return () => clearTimeout(t);
+      }, [connected, pending]);
+
+      function showToast(msg, type='success') {
+        setToast({ msg, type });
+        setTimeout(()=>setToast(null), 3000);
+      }
+      // 서버 응답을 기다리는 쓰기를 센다 (위 안내용)
+      function track(p) {
+        setPending(n => n + 1);
+        const done = () => setPending(n => n - 1);
+        p.then(done, done);
+        return p;
+      }
+
+      // ── 저장 (RTDB) ──
+      // 과제를 통째로 set 하지 않고 transaction 으로 "지금 서버에 있는 값"에 고친 부분만 얹는다 (2026-10-13).
+      // 두 기기가 같은 목표를 고치거나, 연결이 끊긴 사이 다른 기기가 먼저 저장했어도 서로 덮어쓰지 않는다 —
+      // 서버 값이 그사이 바뀌어 있으면 SDK가 patch 를 그 값으로 다시 돌려 둘을 합친다. 데이터 모양은 그대로다.
+      //   saveTask(task)           새 과제 (통째로)
+      //   saveTask(id, cur => …)   고치기. cur 는 저장 시점의 최신 과제. 함수는 부작용 없이 새 값만 돌려준다 (여러 번 불릴 수 있다)
+      // 사본으로 연 동안(로그인 확인 전)은 쓰지 않는다 (2026-10-15)
+      function notReady() {
+        if (!window.__wmCached) return false;
+        showToast('최신 내용을 확인하는 중이에요. 잠시 뒤에 다시 해 주세요', 'error');
+        return true;
+      }
+      function saveTask(idOrTask, patch) {
+        if (notReady()) return;
+        const id = patch ? idOrTask : idOrTask.id;
+        const p = tasksRef().child(id).transaction(cur => {
+          if (!patch) return idOrTask;
+          if (cur == null) return;                     // 이미 지워진 목표 — 되살리지 않고 중단 (committed: false)
+          return { ...patch(cur), updatedAt: Date.now() };
+        });
+        track(p)
+          .then(r => { if (!r.committed) showToast('이미 지워진 목표라 저장하지 않았어요', 'error'); })
+          .catch(e => {
+            if (e && e.message === 'set') return;      // 저장을 기다리는 사이 이 목표를 지웠을 때 SDK가 transaction 을 이렇게 취소한다
+            showToast('저장 실패: ' + e.message, 'error');
+          });
+      }
+      function deleteTask(id) {
+        if (notReady()) return;
+        // 과제를 지우면 Storage의 이미지 원본·썸네일도 같이 지운다 (실패해도 과제 삭제는 진행)
+        const t = tasks.find(x => x.id === id);
+        for (const img of (t && t.images) || []) {
+          if (img.path) imgRef(img.path).delete().catch(()=>{});
+          if (img.thumbPath) imgRef(img.thumbPath).delete().catch(()=>{});
+        }
+        track(tasksRef().child(id).remove()).catch(e => showToast('삭제 실패: ' + e.message, 'error'));
+        setSelected(null);
+      }
+      function sendSchedule(task, dateStr, timeStr) {
+        if (notReady()) return;
+        let start, end, allDay;
+        if (timeStr) {
+          start = new Date(`${dateStr}T${timeStr}:00`).getTime();
+          end = start + 3600000; allDay = false;
+        } else {
+          start = new Date(`${dateStr}T00:00:00`).getTime();
+          end = new Date(`${dateStr}T23:59:59`).getTime(); allDay = true;
+        }
+        // 날짜 칸을 비우고 보내면 start 가 NaN 이 되어 set 이 예외를 던지고 아무 반응이 없었다
+        if (!dateStr || isNaN(start)) { showToast('날짜를 확인해 주세요', 'error'); return; }
+        const rec = {
+          title: task.title, start, end, allDay, repeat: 'none',
+          done: false, location: '', memo: `[목표:${task.id}] 목표 관리자에서 보냄`,
+          createdAt: Date.now(),
+        };
+        const ref = firebase.database().ref(`personal-schedules/${uid}`).push();
+        track(ref.set(rec))
+          .then(()=> showToast(`${fmtDate(dateStr)} 일정으로 보냈습니다 📅`))
+          .catch(e => showToast('일정 전송 실패: ' + e.message, 'error'));
+      }
+
+      // ── 뒤로 스와이프: 열린 창 닫기 (앱 종료 방지) ──
+      const backRef = useRef(null);
+      backRef.current = { showForm, selected };
+      useEffect(()=>{
+        history.pushState({ wm: 1 }, '');
+        const onPop = () => {
+          const s = backRef.current || {};
+          if (s.showForm) setShowForm(false);
+          else if (s.selected) setSelected(null);
+          history.pushState({ wm: 1 }, '');
+        };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+      }, []);
+
+      // ── 목록 계산 ──
+      const visible = useMemo(()=>{
+        const act = tab === 'active';
+        const order = { '진행':0, '대기':1, '보류':2, '완료':0, '중단':1 };
+        const prio = { '높음':0, '보통':1, '낮음':2 };
+        return tasks
+          .filter(t => act ? ACTIVE_STATUSES.includes(t.status) : !ACTIVE_STATUSES.includes(t.status))
+          .filter(t => !catFilter || t.category === catFilter)
+          .sort((a,b) =>
+            (order[a.status]-order[b.status]) ||
+            (act ? (prio[a.priority]-prio[b.priority]) : (b.completedAt||b.updatedAt||0)-(a.completedAt||a.updatedAt||0)) ||
+            (a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
+      }, [tasks, tab, catFilter]);
+
+      const activeCnt  = tasks.filter(t=>ACTIVE_STATUSES.includes(t.status)).length;
+      const archiveCnt = tasks.length - activeCnt;
+
+      return (
+        <div className="wm-app min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors">
+          {/* 헤더 */}
+          <header className="wm-header sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+            <div className="wm-head-top max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+              <h1 className="wm-head-title font-bold text-slate-800 dark:text-slate-100">📋 목표 관리자</h1>
+              <div className="wm-head-tools ml-auto flex items-center gap-1">
+                <button onClick={()=>setDark(!dark)} className="p-2 text-slate-400" title="다크 모드">{dark ? '☀️' : '🌙'}</button>
+                <button onClick={()=>{
+                    const blob = new Blob([JSON.stringify(tasks, null, 2)], { type:'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `과제백업_${today()}.json`; a.click();
+                  }} className="p-2 text-slate-400 text-sm" title="JSON 백업">⬇</button>
+                <button onClick={()=>firebase.auth().signOut()} className="p-2 text-slate-400 text-sm" title="로그아웃">↩</button>
+              </div>
+            </div>
+            {/* 탭 + 분류 필터 */}
+            <div className="wm-head-filters max-w-2xl mx-auto px-4 pb-2 space-y-2">
+              <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1 w-fit">
+                <button onClick={()=>setTab('active')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium ${tab==='active' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}>
+                  진행 중 {activeCnt}
+                </button>
+                <button onClick={()=>setTab('archive')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium ${tab==='archive' ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}>
+                  완료·이력 {archiveCnt}
+                </button>
+              </div>
+              <div className="wm-chips flex gap-1.5 overflow-x-auto pb-1">
+                <button onClick={()=>setCatFilter('')}
+                  className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${!catFilter ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent' : 'border-slate-200 dark:border-slate-600 text-slate-500'}`}>전체</button>
+                {CATEGORIES.map(c => (
+                  <button key={c} onClick={()=>setCatFilter(catFilter===c?'':c)}
+                    className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${catFilter===c ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent' : 'border-slate-200 dark:border-slate-600 text-slate-500'}`}>{c}</button>
+                ))}
+              </div>
+            </div>
+          </header>
+
+          {/* 목록 */}
+          {(() => {
+            const list = (
+              <main className="wm-list max-w-2xl mx-auto px-4 py-4 space-y-2.5 pb-24">
+                {!loaded && <p className="text-center text-sm text-slate-400 py-10">불러오는 중…</p>}
+                {loaded && visible.length === 0 && (
+                  <div className="text-center py-16 space-y-2">
+                    <div className="text-4xl">{tab==='active' ? '🌱' : '📦'}</div>
+                    <p className="text-sm text-slate-400">
+                      {tab==='active' ? '진행 중인 과제가 없습니다. 새 과제를 추가해 보세요.' : '완료된 과제가 여기에 쌓입니다.'}
+                    </p>
+                  </div>
+                )}
+                {visible.map(t => <TaskCard key={t.id} task={t} onSelect={setSelected} active={split && selected && selected.id === t.id} />)}
+              </main>
+            );
+            if (!split) return list;
+            // 태블릿 가로·폴드 펼침: 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기)
+            return (
+              <div className="wm-split">
+                {list}
+                <section className="wm-pane">
+                  {selected
+                    ? <TaskDetail key={selected.id} inline twoCol={tablet} task={selected} uid={uid} schedules={schedules}
+                        onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
+                        onSendSchedule={sendSchedule} onToast={showToast} />
+                    : <Overview tasks={tasks} onSelect={setSelected} />}
+                </section>
+              </div>
+            );
+          })()}
+
+          {/* 새 과제 버튼 */}
+          <button onClick={()=>setShowForm(true)}
+            className="wm-fab fixed bottom-6 right-6 z-20 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-2xl shadow-lg flex items-center justify-center">＋</button>
+
+          {showForm && <TaskForm onSave={saveTask} onClose={()=>setShowForm(false)} />}
+          {selected && !split && (
+            <TaskDetail task={selected} uid={uid} schedules={schedules}
+              onUpdate={saveTask} onDelete={deleteTask} onClose={()=>setSelected(null)}
+              onSendSchedule={sendSchedule} onToast={showToast} />
+          )}
+          {/* 연결 끊김·저장 대기 안내 — 맨 아래 한 줄. 상세 창(z-30)·새 과제 창(z-40) 위, ＋ 버튼(bottom 20~24px) 아래 */}
+          {(notice || user.cached) && (
+            <div className="wm-notice fixed bottom-0 inset-x-0 z-40 px-3 py-0.5 text-center text-[11px] leading-4 bg-amber-100 text-amber-800 dark:bg-amber-900/90 dark:text-amber-100"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 2px)' }}>{user.cached ? '최신 확인 중 — 잠시 뒤에 고칠 수 있어요' : notice}</div>
+          )}
+          <Toast toast={toast} />
+        </div>
+      );
+    }
+
+    // ═══ 루트: 인증 게이트 ═══
+    // ═══ 기기 사본으로 먼저 열기 (2026-10-15 — 도겸 수면·재무현황·담보비율과 같은 방식) ═══
+    // 전엔 로그인 확인 → 구독 응답을 다 기다린 뒤에야 목록이 떴다. 이제 지난번에 받은 목표·일정(wm_cache_v1)으로 바로 그리고,
+    // 로그인 확인이 끝나면 Main 을 새로 띄워 구독한다. 그 사이엔 쓰지 않는다(notReady). 계정 하나분 — 로그아웃·다른 계정이면 지운다.
+    // ?nocache=1 은 사본 없이 열기(비교용)
+    const WM_CACHE = 'wm_cache_v1';
+    function readWmCache() {
+      if (/[?&]nocache=1/.test(location.search)) return null;
+      try {
+        if (localStorage.getItem('wm_signed_in') !== '1') return null;
+        const c = JSON.parse(localStorage.getItem(WM_CACHE) || 'null');
+        return c && c.uid && Array.isArray(c.tasks) && Array.isArray(c.schedules) ? c : null;
+      } catch { return null; }
+    }
+    const wmCacheData = { tasks: null, schedules: null };
+    let wmCacheT = 0;
+    function saveWmCacheSoon(user, part) {
+      Object.assign(wmCacheData, part);
+      if (!wmCacheData.tasks || !wmCacheData.schedules) return;   // 둘 다 한 번 받은 뒤에만
+      clearTimeout(wmCacheT);
+      wmCacheT = setTimeout(() => {
+        try { localStorage.setItem(WM_CACHE, JSON.stringify({ uid: user.uid, email: user.email || '', at: Date.now(), tasks: wmCacheData.tasks, schedules: wmCacheData.schedules })); } catch {}
+      }, 800);
+    }
+    function dropWmCache() { clearTimeout(wmCacheT); try { localStorage.removeItem(WM_CACHE); localStorage.removeItem('wm_signed_in'); } catch {} }
+
+    function App() {
+      const cached = useMemo(()=> readWmCache(), []);
+      const [user, setUser] = useState(()=> cached ? { uid: cached.uid, email: cached.email, cached: true } : undefined);
+      useEffect(()=> firebase.auth().onAuthStateChanged(u => {
+        if (!u) dropWmCache();
+        else {
+          if (cached && cached.uid !== u.uid) dropWmCache();
+          try { localStorage.setItem('wm_signed_in', '1'); } catch {}
+        }
+        setUser(u);
+      }), []);
+      window.__wmCached = !!(user && user.cached);
+      useEffect(()=>{
+        const dark = localStorage.getItem('wm-dark')==='true' ||
+          (!localStorage.getItem('wm-dark') && window.matchMedia('(prefers-color-scheme:dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+      }, []);
+      if (user === undefined) return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900">
+          <p className="text-sm text-slate-400">확인 중…</p>
+        </div>
+      );
+      if (!user) return <Login />;
+      return <Main key={user.cached ? 'cached' : user.uid} user={user} initial={cached && cached.uid === user.uid ? cached : null} />;   // 확인 뒤에도 구독 응답 전까진 사본
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  

@@ -290,7 +290,7 @@
     setPersistence: () => Promise.resolve(),
     onAuthStateChanged(cb) {
       auth.listeners.push(cb);
-      setTimeout(() => { if (auth.listeners.includes(cb)) cb(auth.user); }, 0);
+      setTimeout(() => { if (auth.listeners.includes(cb)) cb(auth.user); }, seed.authDelay || 0);   // authDelay: 로그인 확인이 늦는 상황 (2026-10-15)
       return () => { auth.listeners = auth.listeners.filter(x => x !== cb); };
     },
     signInWithEmailAndPassword(email, pw) {

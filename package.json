@@ -3,6 +3,7 @@
   "private": true,
   "description": "목표 관리 웹앱 (빌드 없음). package.json은 Playwright 시험(test/)만을 위한 것이고 배포(GitHub Pages)에는 쓰이지 않는다.",
   "scripts": {
+    "build": "node build.js",
     "test": "playwright test -c test/playwright.config.js",
     "test:setup": "playwright install chromium"
   },
