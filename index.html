@@ -44,8 +44,9 @@ html, body { overscroll-behavior-y: none; }
        - 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기). 상세가 옆에서 덮는 창 대신 오른쪽 칸에 열린다
        - 화면 높이를 채우고 두 칸이 각자 스크롤
        Tailwind CDN 스타일이 이 태그보다 뒤에 붙으므로 #root를 앞에 붙여 이긴다.
-       JS 쪽 판정은 useMQ(TABLET_MQ) — 조건을 바꾸면 둘 다 바꿀 것. 폴드 펼침 블록은 아래 따로 */
-    @media (min-width: 900px) and (orientation: landscape) {
+       JS 쪽 판정은 useMQ(TABLET_MQ) — 조건을 바꾸면 둘 다 바꿀 것. 폴드 펼침 블록은 아래 따로
+       높이 500 미만(폰 가로, 960×411 등)은 뺀다 — 폭만 보고 태블릿 두 칸·큰 글자가 걸렸다 (2026-10-21) */
+    @media (min-width: 900px) and (orientation: landscape) and (min-height: 500px) {
       html { font-size: 17px; }
       #root .wm-app {
         display: flex;
@@ -307,7 +308,7 @@ html, body { overscroll-behavior-y: none; }
     firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
   </script>
 
-  <script src="./app.js?v=20261015"></script>
+  <script src="./app.js?v=20261021"></script>
   <script>
   // 주소 이전 (2026-10-15): github.io 공용 주소 → 전용 주소. 옛 주소에선 맨 위에 이동 띠(로그인 화면 위에도).
   // 목표·일정은 계정(RTDB)에 있어 옮길 것이 없다. 새 주소에선 로그인만 한 번 다시

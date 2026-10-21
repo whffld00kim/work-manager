@@ -96,7 +96,8 @@
 
     // ═══ 화면 판정 — CSS의 @media와 같은 조건 (조건을 바꾸면 둘 다) ═══
     // 태블릿 가로(2026-09-28): 목록|상세 두 칸 + 상세 안 두 단 · 폴드7 펼침/태블릿 세로(2026-10-09): 목록|상세 두 칸, 상세 안은 폰처럼 한 줄
-    const TABLET_MQ = '(min-width: 900px) and (orientation: landscape)';
+    // 높이 500 미만(폰 가로)은 태블릿에서 뺀다 (2026-10-21)
+    const TABLET_MQ = '(min-width: 900px) and (orientation: landscape) and (min-height: 500px)';
     const FOLD_MQ = '(min-width: 600px) and (max-width: 899px) and (min-height: 500px), (min-width: 600px) and (orientation: portrait)';
     function useMQ(query) {
       const [on, setOn] = useState(() => window.matchMedia(query).matches);

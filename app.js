@@ -114,7 +114,7 @@ function schedDone(s) {
   if (s.done) return true;
   return Array.isArray(s.doneDates) && s.doneDates.includes(schedDate(s));
 }
-const TABLET_MQ = '(min-width: 900px) and (orientation: landscape)';
+const TABLET_MQ = '(min-width: 900px) and (orientation: landscape) and (min-height: 500px)';
 const FOLD_MQ = '(min-width: 600px) and (max-width: 899px) and (min-height: 500px), (min-width: 600px) and (orientation: portrait)';
 function useMQ(query) {
   const [on, setOn] = useState(() => window.matchMedia(query).matches);
