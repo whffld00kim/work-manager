@@ -12,7 +12,7 @@ test('시각을 넣으면 기기 시간대 기준 1시간 일정, 레코드 모�
   await page.locator('.wm-d-sched input[type=date]').fill('2030-02-03');
   await page.locator('.wm-d-sched input[type=time]').fill('14:30');
   await page.locator('.wm-d-sched').getByRole('button', { name: '보내기', exact: true }).click();
-  await expect(app.toast()).toContainText('2030.02.03 일정으로 보냈습니다');
+  await expect(app.toast()).toContainText('2030.02.03 일정으로 보냈어요');
   await expect.poll(() => app.pending()).toBe(0);
   const all = await app.server(SCHED);
   const recs = Object.values(all);
@@ -21,7 +21,7 @@ test('시각을 넣으면 기기 시간대 기준 1시간 일정, 레코드 모�
   const expectStart = await page.evaluate(() => new Date('2030-02-03T14:30:00').getTime());
   expect(r).toEqual({
     title: '연습 목표', start: expectStart, end: expectStart + 3600000, allDay: false, repeat: 'none',
-    done: false, location: '', memo: '[목표:t1] 목표 관리자에서 보냄', createdAt: expect.any(Number),
+    done: false, location: '', memo: '[목표:t1] 목표 관리에서 보냄', createdAt: expect.any(Number),
   });
   // 연동 목록에 바로 나타난다
   await expect(page.locator('.wm-d-sched').getByText('2030.02.03')).toBeVisible();
@@ -67,11 +67,11 @@ test('일정 전송이 거부되면 연동 목록에 남지 않는다', async ({
 test('다른 기기에서 보낸 일정과 일정 앱에서 완료한 표시가 이 기기에도 나타난다', async ({ app, page }) => {
   await app.open();
   await app.openDetail();
-  await expect(page.locator('.wm-d-sched').getByText('아직 연동된 일정이 없습니다')).toBeVisible();
+  await expect(page.locator('.wm-d-sched').getByText('아직 연동된 일정이 없어요')).toBeVisible();
   const start = await page.evaluate(() => new Date('2030-03-04T09:00:00').getTime());
   await app.serverSet(`${SCHED}/-OtherDevice1`, {
     title: '연습 목표', start, end: start + 3600000, allDay: false, repeat: 'none', done: false, location: '',
-    memo: '[목표:t1] 목표 관리자에서 보냄', createdAt: start,
+    memo: '[목표:t1] 목표 관리에서 보냄', createdAt: start,
   });
   await expect(page.locator('.wm-d-sched').getByText('2030.03.04')).toBeVisible();
   await app.serverSet(`${SCHED}/-OtherDevice1/done`, true);          // 일정 앱에서 완료 표시
@@ -81,8 +81,8 @@ test('다른 기기에서 보낸 일정과 일정 앱에서 완료한 표시가 
 test('연동 목록은 이 목표의 태그가 있는 일정만, 최근 날짜부터', async ({ app, page }) => {
   const start = (d) => Date.UTC(2030, 0, d, 3);   // 한국 시간 낮
   await app.open(seedWith([sampleTask()], {
-    a: { title: 'A', start: start(5), end: start(5) + 1, allDay: false, repeat: 'none', done: false, location: '', memo: '[목표:t1] 목표 관리자에서 보냄', createdAt: 1 },
-    b: { title: 'B', start: start(9), end: start(9) + 1, allDay: false, repeat: 'none', done: true, location: '', memo: '[목표:t1] 목표 관리자에서 보냄', createdAt: 1 },
+    a: { title: 'A', start: start(5), end: start(5) + 1, allDay: false, repeat: 'none', done: false, location: '', memo: '[목표:t1] 목표 관리에서 보냄', createdAt: 1 },
+    b: { title: 'B', start: start(9), end: start(9) + 1, allDay: false, repeat: 'none', done: true, location: '', memo: '[목표:t1] 목표 관리에서 보냄', createdAt: 1 },
     c: { title: 'C', start: start(7), end: start(7) + 1, allDay: false, repeat: 'none', done: false, location: '', memo: '[목표:other] 다른 목표', createdAt: 1 },
     d: { title: 'D', start: start(1), end: start(1) + 1, allDay: false, repeat: 'none', done: false, location: '', createdAt: 1 },
   }));

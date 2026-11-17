@@ -68,7 +68,7 @@ test('사진 하나만 지우면 원본·썸네일 파일과 메타데이터가 
   await page.getByTitle('삭제').click();                                  // confirm 은 fixture 가 확인
   await expect.poll(() => app.pending()).toBe(0);
   expect((await app.server(T1)).images ?? []).toEqual([]);
-  expect(Object.keys(await app.storageFiles())).toEqual([]);
+  await expect.poll(() => app.storageFiles().then(f => Object.keys(f))).toEqual([]);   // 파일은 기록이 받아들여진 뒤에 지운다
 });
 
 test('목표를 지우면 Storage 의 사진도 함께 지워진다', async ({ app, page }) => {

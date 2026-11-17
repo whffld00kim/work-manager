@@ -7,7 +7,11 @@
 //  - 서버가 거부(PERMISSION_DENIED)하면 promise 가 reject 되고 화면 값은 서버 값으로 되돌아간다
 //  - 빈 배열·null 은 지워지고, 숫자 키 객체는 배열로 돌아온다. undefined·NaN 은 set 시점에 동기 예외
 //  - .info/connected
-// 시험에서 조작하는 손잡이: window.__fake  (db.setOnline · db.serverSet · db.serverGet · db.deny · storage.hold/release/failPattern …)
+//  - **이 기기가 서버 값을 아직 못 받은 때** (2026-11-17 — 기기 사본으로 먼저 여는 앱은 이 틈에도 화면이 떠 있다):
+//      구독은 첫 값이 올 때까지 조용하고, 그 전의 쓰기는 구독에 보이지 않으며, transaction 은 「값 없음(null)」으로 먼저 불린다
+//      (그때 undefined 를 돌려주면 서버에 묻지도 않고 중단된다 — 진짜 SDK 가 그렇다)
+//      seed.holdFirstValue: 서버 첫 값을 __fake.db.releaseFirstValue() 까지 붙들어 둔다(느린 망) · seed.startOffline: 끊긴 채로 시작
+// 시험에서 조작하는 손잡이: window.__fake  (db.setOnline · db.serverSet · db.serverGet · db.deny · db.releaseFirstValue · storage.hold/release/failPattern …)
 (function () {
   if (window.firebase) return;
 
@@ -128,9 +132,12 @@
       exportVal: () => clone(val),
     };
   }
+  // 이 기기가 그 경로의 서버 값을 받은 적이 있는가 (첫 값을 받은 구독이 그 경로를 덮고 있는가)
+  const hasCache = parts => db.listeners.some(l => l.delivered && isPrefix(l.parts, parts));
   function fireAll() {
     const tree = localTree();
     for (const l of db.listeners.slice()) {
+      if (!l.delivered) continue;   // 서버 첫 값을 받기 전의 구독은 이 기기의 쓰기에도 울리지 않는다
       const json = JSON.stringify(getAt(tree, l.parts));
       if (l.last !== json) { l.last = json; l.cb(snapshot(l.parts, tree)); }
     }
@@ -222,8 +229,9 @@
       transaction(fn, onComplete, applyLocally) {
         if (typeof fn !== 'function') throw new Error('Reference.transaction failed: First argument must be a function');
         const op = { type: 'transaction', parts, fn };
-        // 첫 실행에서 undefined 를 돌려주면 서버에 보내지 않고 바로 중단된다
-        const cur = toVal(getAt(localTree(), parts));
+        // 첫 실행에서 undefined 를 돌려주면 서버에 보내지 않고 바로 중단된다.
+        // 이 기기에 서버 값이 아직 없으면 첫 실행은 「값 없음」으로 불린다 (서버에 닿은 뒤에야 진짜 값으로 다시 돈다)
+        const cur = hasCache(parts) ? toVal(getAt(localTree(), parts)) : null;
         let first;
         try { first = fn(cur); } catch (e) { const p = Promise.reject(e); if (onComplete) p.catch(err => onComplete(err, false, null)); return p; }
         if (first === undefined) {
@@ -243,16 +251,18 @@
           setTimeout(() => { if (db.infoListeners.includes(l)) cb({ key: 'connected', val: () => db.online, exists: () => true }); }, 0);
           return cb;
         }
-        const l = { parts, cb, cancel, last: undefined };
+        const l = { parts, cb, cancel, last: undefined, delivered: false };
         db.listeners.push(l);
         // 서버에서 첫 값을 받는다 (비동기). 오프라인이면 연결될 때까지 아무것도 오지 않는다 — 실제 SDK 와 같다
         const deliver = () => {
           if (!db.listeners.includes(l)) return;
           const tree = localTree();
           l.last = JSON.stringify(getAt(tree, parts));
+          l.delivered = true;
           cb(snapshot(parts, tree));
         };
-        if (db.online || db.everOnline) setTimeout(deliver, 0);
+        if (db.held) db.heldValues.push(deliver);                    // 느린 망: 첫 값을 붙들어 둔다 (releaseFirstValue)
+        else if (db.online || db.everOnline) setTimeout(deliver, 0);
         else db.waiting.push(deliver);
         return cb;
       },
@@ -272,6 +282,9 @@
   let pushCounter = 0;
   db.waiting = [];
   db.everOnline = true;
+  db.held = !!seed.holdFirstValue;   // 서버 첫 값을 붙들어 둔다
+  db.heldValues = [];
+  if (seed.startOffline) { db.online = false; db.everOnline = false; }   // 끊긴 채로 시작 — 연결될 때까지 구독에 아무것도 오지 않는다
 
   const database = {
     ref: p => makeRef(splitPath(p)),
@@ -304,7 +317,7 @@
 
   // ─────────────── Storage ───────────────
   const storage = {
-    files: {},            // path → { size, contentType, meta }
+    files: { ...(seed.storageFiles || {}) },   // path → { size, contentType, meta } (seed.storageFiles: 이미 올라가 있는 파일)
     hold: false,          // true 면 업로드가 release() 까지 멈춘다 (느린 연결·앱 종료 시험)
     held: [],
     failPattern: null,    // 경로가 맞으면 업로드 실패
@@ -404,6 +417,8 @@
         }
       },
       isOnline: () => db.online,
+      // 붙들어 둔 서버 첫 값을 내려보낸다 (seed.holdFirstValue)
+      releaseFirstValue() { db.held = false; const h = db.heldValues; db.heldValues = []; h.forEach(f => f()); },
       // 다른 기기(또는 다른 앱)가 서버에 쓴 것처럼 — 연결돼 있으면 곧바로 이 기기에 내려온다
       serverSet(path, value) {
         db.server = setAt(db.server, splitPath(path), value);

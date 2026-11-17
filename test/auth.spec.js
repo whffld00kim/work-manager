@@ -9,7 +9,9 @@ test('로그인 화면 → 로그인 → 목록, 로그아웃하면 다시 로�
   await page.getByPlaceholder('비밀번호').fill('pw');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page.locator('.wm-card').filter({ hasText: '연습 목표' })).toBeVisible();
-  await page.getByTitle('로그아웃').click();
+  await page.getByRole('button', { name: '정보' }).click();
+  await page.getByRole('button', { name: /로그아웃/ }).click();   // 「로그아웃할까요?」 확인 창은 fixture 가 확인
+  expect(app.dialogs.some(d => d.includes('로그아웃할까요'))).toBe(true);
   await expect(page.getByPlaceholder('이메일')).toBeVisible();
   expect(app.errors).toEqual([]);
 });

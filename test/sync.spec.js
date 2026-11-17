@@ -45,7 +45,8 @@ test('저장이 거부되면 화면도 서버 값으로 되돌아간다 (성공�
   await app.deny(true);
   await app.addLog('거부될 기록');
   await expect(app.toast()).toContainText('저장 실패');
-  await expect(page.locator('.wm-d-log').getByText('거부될 기록')).toHaveCount(0);
+  await expect(page.locator('.wm-d-log p').filter({ hasText: '거부될 기록' })).toHaveCount(0);   // 기록 목록에는 없다
+  await expect(page.locator('.wm-d-log textarea')).toHaveValue('거부될 기록');                    // 쓴 글은 입력 칸에 되돌아와 있다
   expect(((await app.server(T1)).log || []).map(l => l.text)).toEqual(['첫 기록']);
 });
 
@@ -100,7 +101,7 @@ test('오프라인에서 고친 직후 목표를 지워도 에러 토스트 없�
 test('새 목표는 서버에 그대로 저장되고 목록에 나타난다', async ({ app, page }) => {
   await app.open(seedWith([]));
   await page.locator('.wm-fab').click();
-  await page.getByPlaceholder('과제 제목').fill('새 연습 목표');
+  await page.getByPlaceholder('목표 제목').fill('새 연습 목표');
   await page.getByPlaceholder('첫 진행 기록 (선택)').fill('시작');
   await page.locator('.wm-form').getByRole('button', { name: '추가' }).click();
   await expect(page.locator('.wm-card').filter({ hasText: '새 연습 목표' })).toBeVisible();

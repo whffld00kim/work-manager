@@ -11,11 +11,40 @@
       "test/**",
       "test-results/**",
       "build.js",
+      "tailwind.config.js",
       "package.json",
       "package-lock.json",
-      "README.md"
+      "README.md",
+      "icon.svg",
+      "icon-maskable.svg",
+      "icons/app-source.svg"
     ],
     "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "Content-Security-Policy",
+            "value": "frame-ancestors 'none'"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(), microphone=(), geolocation=(), payment=()"
+          }
+        ]
+      },
       {
         "source": "/sw.js",
         "headers": [

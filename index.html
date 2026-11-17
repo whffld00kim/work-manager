@@ -2,7 +2,36 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <script>
+  // 옛 주소(github.io) → 전용 주소 minsung-goals.web.app (2026-10-15 이전).
+  // 2026-11-17: 「새 주소로 이동」 띠만 띄우던 것을 바로 넘기도록 바꿨다 — 옛 주소는 다른 웹앱들과 저장소를 나눠 쓰는 주소인데
+  // 앱이 거기서 통째로 돌며 목표·일정 사본을 그 저장소에 두고 있었다. 목표·일정은 계정(서버)에 있어 실어 보낼 것이 없다.
+  // 이 주소에 남은 이 앱의 것(사본·설정·서비스워커·캐시)만 지우고 넘긴다.
+  // ⚠ 로그인 저장소(firebaseLocalStorageDb)는 건드리지 않는다 — 같은 주소의 다른 앱이 같은 로그인을 나눠 쓴다
+  (function () {
+    if (!/(^|\.)github\.io$/.test(location.hostname)) return;
+    window.__goalsMoved = true;   // 아래 Firebase 시작·app.js 의 화면 그리기·서비스워커 등록이 이 표시를 보고 아무것도 하지 않는다
+    try { ['wm_cache_v1', 'wm_signed_in', 'wm-dark'].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+    try { document.documentElement.style.visibility = 'hidden'; } catch (e) {}   // 넘어가기 전 빈 화면이 비치지 않게
+    var go = function () { location.replace('https://minsung-goals.web.app/'); };
+    try {
+      var jobs = [];
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.filter(function (r) { return /\/work-manager\//.test(r.scope); }).map(function (r) { return r.unregister(); }));
+        }));
+      }
+      if (window.caches) {
+        jobs.push(caches.keys().then(function (ks) {
+          return Promise.all(ks.filter(function (k) { return k.indexOf('wm-cache-') === 0; }).map(function (k) { return caches.delete(k); }));
+        }));
+      }
+      Promise.race([Promise.all(jobs), new Promise(function (r) { setTimeout(r, 1500); })]).then(go, go);
+    } catch (e) { go(); }
+  })();
+  </script>
+  <!-- interactive-widget=resizes-content: 자판이 뜨면 화면(덮개·바닥에 붙는 안내 줄)이 자판 위로 줄어든다 (2026-11-17) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1e293b" media="(prefers-color-scheme: dark)" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -11,21 +40,16 @@
   <meta name="apple-mobile-web-app-title" content="목표 관리" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icons/app-any-192.png" />
-  <title>목표 관리자</title>
+  <title>목표 관리</title>
 
-  <!-- React -->
-  <!-- 버전을 정확히 고정한다 (2026-09-03). @18처럼 두면 CDN이 다른 18.x를 줄 때 동작이 바뀔 수 있다. sw.js 캐시 목록과 맞출 것 -->
-  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Firebase (compat — book-tracker와 같은 버전) -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-
-  <script>tailwind.config = { darkMode: 'class' };</script>
+  <!-- 라이브러리는 이 앱과 함께 배포한다 (vendor/, 2026-11-17 — 전엔 열 때마다 바깥 배포망에서 변조 확인 없이 받았다).
+       파일은 공식 배포본 그대로다: React 18.3.1 · Firebase 10.7.1(compat). 판을 올릴 땐 파일을 바꾸고 sw.js 의 CACHE 를 올린다 -->
+  <script src="./vendor/react.production.min.js"></script>
+  <script src="./vendor/react-dom.production.min.js"></script>
+  <script src="./vendor/firebase-app-compat.js"></script>
+  <script src="./vendor/firebase-auth-compat.js"></script>
+  <script src="./vendor/firebase-database-compat.js"></script>
+  <script src="./vendor/firebase-storage-compat.js"></script>
 
   <style>
 /* 맨 위에서 아래로 당기면 크롬이 페이지를 새로고침하던 것을 막는다 (2026-09-28 사용자 요청 — 새로고침되며 로그인 화면이 다시 떴다) */
@@ -37,13 +61,15 @@ html, body { overscroll-behavior-y: none; }
     * { box-sizing: border-box; }
     body { padding-bottom: env(safe-area-inset-bottom); }
     header { padding-top: env(safe-area-inset-top); }
+    /* 어두운 화면에선 날짜 칸의 달력 그림·고르는 창도 어두운 판으로 (2026-11-17 — 전엔 어두운 칸 위에 검은 달력 그림이었다) */
+    html.dark { color-scheme: dark; }
 
     /* ============ 태블릿 (2026-09-28) ============
        갤럭시 탭을 가로로 두고 쓸 때. 폰 화면은 건드리지 않고 넓을 때만 덮어쓴다.
        - 헤더는 한 줄 (제목 · 탭 · 분류 · 도구)
        - 왼쪽 목록 | 오른쪽 상세 (고르기 전엔 한눈에 보기). 상세가 옆에서 덮는 창 대신 오른쪽 칸에 열린다
        - 화면 높이를 채우고 두 칸이 각자 스크롤
-       Tailwind CDN 스타일이 이 태그보다 뒤에 붙으므로 #root를 앞에 붙여 이긴다.
+       이 style 뒤에 app.css(테일윈드 규칙)가 오므로 #root를 앞에 붙여 우선순위로 이긴다.
        JS 쪽 판정은 useMQ(TABLET_MQ) — 조건을 바꾸면 둘 다 바꿀 것. 폴드 펼침 블록은 아래 따로
        높이 500 미만(폰 가로, 960×411 등)은 뺀다 — 폭만 보고 태블릿 두 칸·큰 글자가 걸렸다 (2026-10-21) */
     @media (min-width: 900px) and (orientation: landscape) and (min-height: 500px) {
@@ -84,7 +110,7 @@ html, body { overscroll-behavior-y: none; }
       #root .wm-chips { flex: 1 1 auto; min-width: 0; padding-bottom: 0; }
       #root .wm-chips button { padding-left: 13px; padding-right: 13px; font-size: .8rem; }
       #root .wm-head-tools { order: 2; flex: 0 0 auto; margin-left: 0; }
-      #root .wm-head-tools button { padding: 10px; font-size: 1.05rem; }
+      #root .wm-head-tools button { font-size: 1rem; }
 
       /* ── 목록 | 상세 ── */
       #root .wm-split {
@@ -110,7 +136,7 @@ html, body { overscroll-behavior-y: none; }
       /* 목록이 짧으면 카드가 조금씩 커져서 칸을 채운다 (길면 그대로 스크롤) */
       #root .wm-card {
         flex: 1 0 auto;
-        max-height: 132px;
+        max-height: 150px;   /* 제목 세 줄 + 진행 막대까지 들어가는 높이 */
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -288,6 +314,9 @@ html, body { overscroll-behavior-y: none; }
       #root .wm-form { max-width: 560px; }
     }
   </style>
+  <!-- 화면 꾸밈 규칙(테일윈드)은 미리 만들어 둔 파일을 쓴다 (2026-11-17 — 전엔 열 때마다 바깥 스크립트 407KB 가 브라우저에서 만들었다).
+       src/app.jsx·index.html 에서 쓰는 클래스만 들어 있다. 다시 만들기: npm run build -->
+  <link rel="stylesheet" href="./app.css?v=20261117" />
 </head>
 <body>
   <div id="root"></div>
@@ -295,36 +324,41 @@ html, body { overscroll-behavior-y: none; }
   <script>
     // ═══ Firebase — minsung-buboo2 (민성 스케줄·Book Tracker와 같은 프로젝트) ═══
     // 같은 계정으로 로그인해야 uid가 같아져서 개인일정 연동이 동작한다.
-    const firebaseConfig = {
-      apiKey: 'AIzaSyAPXiob8XeDunXpDMsLod_TwClqg2JL260',
-      authDomain: 'minsung-buboo2.firebaseapp.com',
-      databaseURL: 'https://minsung-buboo2-default-rtdb.asia-southeast1.firebasedatabase.app',
-      projectId: 'minsung-buboo2',
-      storageBucket: 'minsung-buboo2.firebasestorage.app',
-      messagingSenderId: '318424534715',
-      appId: '1:318424534715:web:50a3b43ea5c5325ee5239e'
-    };
-    firebase.initializeApp(firebaseConfig);
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
+    if (!window.__goalsMoved) {
+      firebase.initializeApp({
+        apiKey: 'AIzaSyAPXiob8XeDunXpDMsLod_TwClqg2JL260',
+        authDomain: 'minsung-buboo2.firebaseapp.com',
+        databaseURL: 'https://minsung-buboo2-default-rtdb.asia-southeast1.firebasedatabase.app',
+        projectId: 'minsung-buboo2',
+        storageBucket: 'minsung-buboo2.firebasestorage.app',
+        messagingSenderId: '318424534715',
+        appId: '1:318424534715:web:50a3b43ea5c5325ee5239e'
+      });
+      firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
+    }
   </script>
 
-  <script src="./app.js?v=20261021"></script>
-  <script>
-  // 주소 이전 (2026-10-15): github.io 공용 주소 → 전용 주소. 옛 주소에선 맨 위에 이동 띠(로그인 화면 위에도).
-  // 목표·일정은 계정(RTDB)에 있어 옮길 것이 없다. 새 주소에선 로그인만 한 번 다시
-  (function () {
-    if (!/(^|\.)github\.io$/.test(location.hostname)) return;
-    const bar = document.createElement('div');
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;background:#f59e0b;color:#111;padding:10px 12px;text-align:center;font-size:14px;line-height:1.5;font-weight:600';
-    bar.innerHTML = '목표 관리가 새 주소로 옮겼습니다 <a href="https://minsung-goals.web.app/" style="margin-left:8px;padding:4px 12px;border-radius:6px;background:#111;color:#fff;text-decoration:none">새 주소로 이동</a>';
-    document.body.appendChild(bar);
-  })();
-  </script>
+  <script src="./app.js?v=20261117"></script>
 
-  <!-- Service Worker registration -->
   <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
+    // 서비스워커 — 저장본으로 먼저 열고 뒤에서 새 파일을 받는다(sw.js).
+    // 새 판이 자리를 잡으면 화면이 스스로 새로 고친다 (2026-11-17, 가계부·재무현황·담보비율과 같은 방식 — 전엔 고친 뒤 두 번 열어야 새 화면이었다).
+    // 처음 설치(이전 서비스워커가 없던 첫 방문)에는 새로 고치지 않는다. 쓰던 글·열린 창·보내는 중인 저장이 있으면 끝날 때까지 미룬다(app.js 의 __appBusy)
+    if ('serviceWorker' in navigator && !window.__goalsMoved) {
+      let hadController = !!navigator.serviceWorker.controller, reloading = false;
+      const reloadWhenIdle = function () {
+        let busy = false;
+        try { busy = !!(window.__appBusy && window.__appBusy()); } catch (e) {}
+        if (busy) { setTimeout(reloadWhenIdle, 1500); return; }
+        window.location.reload();
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!hadController) { hadController = true; return; }
+        if (reloading) return;
+        reloading = true;
+        reloadWhenIdle();
+      });
+      window.addEventListener('load', function () {
         navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function(){});
       });
     }
